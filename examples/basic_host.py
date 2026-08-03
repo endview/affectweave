@@ -106,7 +106,7 @@ def main() -> None:
     )
 
     # 2. The host uses its own AI/model integration.
-    raw_output = call_host_ai(packet.prompt_fragment, dict(packet.output_schema))
+    raw_output = call_host_ai(packet.to_prompt(), dict(packet.output_schema))
 
     # 3. AffectWeave validates the returned JSON and applies bounded state proposals.
     committed = affectweave.commit_output(

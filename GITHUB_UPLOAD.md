@@ -41,7 +41,7 @@ git push -u origin main
 ## 4. Push the demo tag
 
 ```bash
-git push origin v0.1-demo
+git push origin v0.2-demo
 ```
 
 ## 5. Create the first release
@@ -49,9 +49,9 @@ git push origin v0.1-demo
 Attach the wheel from the submission package:
 
 ```bash
-gh release create v0.1-demo \
-  release-assets/affectweave-0.1.0.dev0-py3-none-any.whl \
-  --title "AffectWeave v0.1-demo" \
+gh release create v0.2-demo \
+  release-assets/affectweave-0.2.0.dev0-py3-none-any.whl \
+  --title "AffectWeave v0.2-demo" \
   --notes-file RELEASE_NOTES.md
 ```
 
@@ -72,7 +72,7 @@ ai-character
 emotion
 memory
 character-continuity
-prompt-engineering
+context-engineering
 state-management
 chatbot
 roleplay
@@ -89,7 +89,7 @@ gh repo edit --add-topic llm \
   --add-topic emotion \
   --add-topic memory \
   --add-topic character-continuity \
-  --add-topic prompt-engineering \
+  --add-topic context-engineering \
   --add-topic state-management \
   --add-topic chatbot \
   --add-topic roleplay
@@ -101,14 +101,14 @@ Check:
 
 ```bash
 gh repo view --web
-gh release view v0.1-demo
+gh release view v0.2-demo
 gh run list --limit 5
 ```
 
 Confirm that:
 
 - `main` is the default branch;
-- the `v0.1-demo` tag is visible;
+- the `v0.2-demo` tag is visible;
 - the first release contains the wheel;
 - GitHub Actions completes the Python test matrix;
 - README badges and links render correctly.

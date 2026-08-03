@@ -200,6 +200,70 @@ class IntegrationTests(unittest.TestCase):
             data = json.loads(prepared.stdout)
             self.assertEqual("affectweave-enhancement/1", data["schema_version"])
 
+    def test_cli_context_and_message_renderings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            db = Path(temp) / "affectweave.sqlite3"
+            env = {"PYTHONPATH": str(Path(__file__).parents[1] / "src")}
+            init = subprocess.run(
+                [sys.executable, "-m", "affectweave.cli", "--db", str(db), "init"],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(0, init.returncode, init.stderr)
+
+            context_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "affectweave.cli",
+                    "--db",
+                    str(db),
+                    "prepare",
+                    "--message",
+                    "hello",
+                    "--idempotency-key",
+                    "cli-context",
+                    "--format",
+                    "context",
+                    "--show-budget",
+                ],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(0, context_result.returncode, context_result.stderr)
+            context = json.loads(context_result.stdout)
+            self.assertEqual("affectweave-context/1", context["schema_version"])
+            self.assertIn("estimated_tokens", json.loads(context_result.stderr))
+
+            messages_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "affectweave.cli",
+                    "--db",
+                    str(db),
+                    "prepare",
+                    "--message",
+                    "hello again",
+                    "--idempotency-key",
+                    "cli-messages",
+                    "--format",
+                    "messages",
+                ],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(0, messages_result.returncode, messages_result.stderr)
+            messages = json.loads(messages_result.stdout)
+            self.assertEqual("developer", messages[0]["role"])
+            self.assertIn("AFFECTWEAVE ENHANCEMENT PACKET", messages[0]["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

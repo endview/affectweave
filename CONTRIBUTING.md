@@ -13,16 +13,17 @@
 python -m pip install -e .
 python -m unittest discover -s tests -v
 python examples/basic_host.py
+python examples/rendering_formats.py
 ```
 
 5. 提交 Pull Request，并说明问题、实现方式和测试结果。
 
 ## 设计原则
 
-- 保持 Core、Compiler 和 Integration 的职责边界。
+- 保持 Core、Context Compiler、Renderer 和 Integration 的职责边界。
 - 状态变化必须经过校验和限幅。
 - 候选回复、实际交付和后续结果必须分开记录。
-- 保持 Packet 与宿主实现解耦。
+- 保持 ContextPackage、Renderer、Packet 与宿主实现解耦。
 - 新增公共字段时考虑序列化和持久化兼容性。
 
 ## Commit 建议

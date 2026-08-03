@@ -126,7 +126,22 @@ def command_prepare(args: argparse.Namespace) -> int:
         )
         if args.packet_file:
             Path(args.packet_file).write_text(packet.to_json(), encoding="utf-8")
-        print(packet.to_prompt(include_schema=args.include_schema) if args.format == "prompt" else packet.to_json())
+
+        if args.show_budget:
+            print(
+                json.dumps(packet.context_package.budget.to_dict(), ensure_ascii=False, indent=2),
+                file=sys.stderr,
+            )
+
+        if args.format in {"prompt", "text"}:
+            rendered = packet.to_prompt(include_schema=args.include_schema)
+        elif args.format == "context":
+            rendered = packet.to_context_json()
+        elif args.format == "messages":
+            rendered = json.dumps(packet.to_messages(), ensure_ascii=False, indent=2)
+        else:
+            rendered = packet.to_json()
+        print(rendered)
         return 2 if packet.overflow else 0
     finally:
         repository.close()
@@ -250,8 +265,14 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--idempotency-key", required=True)
     prepare.add_argument("--token-budget", type=int)
     prepare.add_argument("--packet-file")
-    prepare.add_argument("--format", choices=("json", "prompt"), default="json")
+    prepare.add_argument(
+        "--format",
+        choices=("json", "packet", "prompt", "text", "context", "messages"),
+        default="json",
+        help="render the packet, prompt fragment, context JSON, or generic message blocks",
+    )
     prepare.add_argument("--include-schema", action="store_true")
+    prepare.add_argument("--show-budget", action="store_true")
     prepare.set_defaults(func=command_prepare)
 
     commit = sub.add_parser("commit", help="validate and commit host AI JSON output")

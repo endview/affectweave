@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: Version
-      placeholder: v0.1-demo
+      placeholder: v0.2-demo
     validations:
       required: true
   - type: textarea

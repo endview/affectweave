@@ -1,66 +1,50 @@
 # AffectWeave
 
-![Release](https://img.shields.io/badge/release-v0.1--demo-orange)
+![Release](https://img.shields.io/badge/release-v0.2--demo-orange)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-public%20demo-lightgrey)
 
 **Give AI characters emotional continuity.**
 
-AffectWeave 是一个持续人物状态与提示词增强引擎，用于让现有 AI 保有人格、情绪、关系、记忆和未完成事件的连续性。
+AffectWeave 是一个持续人物状态与上下文增强引擎。它长期维护人物的人格、情绪、关系、记忆和未完成事件，并在每轮对话前，将当前相关状态编译为紧凑的 `ContextPackage`。
 
-它将人物完整状态保存在模型上下文之外，并在每轮对话前编译一份紧凑的 `EnhancementPacket`。宿主 AI 使用 Packet 生成回复，再将实际交付和后续结果回传，持续编织人物的情感、关系与行为轨迹。
+同一份 `ContextPackage` 可以渲染为文本提示词、结构化 JSON 或通用消息块，再交给宿主已有的 AI。宿主返回结构化结果后，AffectWeave 校验状态变化，并根据实际交付和后续结果持续更新人物轨迹。
 
 ```mermaid
 flowchart LR
-    U[用户消息] --> P[AffectWeave State Engine]
-    P --> E[EnhancementPacket]
-    E --> H[宿主 AI]
-    H --> R[结构化结果与回复]
-    R --> V[AffectWeave 校验与状态更新]
+    U[用户消息] --> C[AffectWeave Core]
+    C --> CC[Context Compiler]
+    CC --> CP[ContextPackage]
+    CP --> T[Text Prompt]
+    CP --> J[JSON]
+    CP --> M[Message Blocks]
+    T --> H[宿主 AI]
+    J --> H
+    M --> H
+    H --> V[输出校验与状态更新]
     V --> D[实际交付]
     D --> O[结果反馈]
-    O --> P
+    O --> C
 ```
 
 ## AffectWeave 能做什么
 
-- **持续人物状态**：保存 Persona、中期状态、情绪实例、关系、ActiveThread 和情节记忆。
-- **紧凑上下文编译**：从完整状态中筛选当前相关信息，生成有预算限制的提示词片段。
-- **结构化状态提案**：接收宿主 AI 返回的 JSON，校验并限幅情绪、关系和中期状态变化。
+- **持续人物状态**：维护 Persona、中期状态、情绪实例、关系、ActiveThread 和情节记忆。
+- **上下文编译**：从完整状态中选择当前相关内容，生成有预算限制的 `ContextPackage`。
+- **多格式渲染**：将同一份上下文渲染为文本提示词、JSON 或通用消息块。
+- **裁剪审计**：记录上下文预算、包含内容、删除内容和删除原因。
+- **结构化状态提案**：校验宿主 AI 返回的 JSON，并限幅情绪、关系和中期状态变化。
 - **真实行为闭环**：区分候选回复、实际交付、观察结果和确认结果。
-- **跨宿主复用**：通过统一的 Packet 与 JSON Schema 接入 Python 应用、编码代理、游戏角色或其他 AI 宿主。
-- **本地持久化**：支持内存仓库和 SQLite 状态存储。
+- **状态持久化**：支持内存仓库和 SQLite。
 
-## 5 分钟快速开始
-
-### 1. 安装
+## 5 分钟本地验证
 
 ```bash
 python -m pip install -e .
-```
-
-### 2. 运行测试
-
-```bash
 python -m unittest discover -s tests -v
-```
-
-### 3. 运行完整示例
-
-```bash
 python examples/basic_host.py
-```
-
-示例执行以下流程：
-
-```text
-prepare_turn
-→ 宿主 AI 生成 JSON
-→ commit_output
-→ 宿主实际发送回复
-→ record_delivery
-→ record_outcome
+python examples/rendering_formats.py
 ```
 
 ## 最小 Python 接入
@@ -96,9 +80,13 @@ packet = affectweave.prepare_turn(
     expected_state_version=state.version,
 )
 
-# 使用宿主已有的模型调用。
+# 选择适合宿主的上下文形式。
+prompt = packet.to_prompt()
+context_json = packet.to_context_json()
+message_blocks = packet.to_messages()
+
 raw_output = host_ai_generate_json(
-    prompt=packet.prompt_fragment,
+    prompt=prompt,
     output_schema=packet.output_schema,
 )
 
@@ -112,7 +100,7 @@ committed = affectweave.commit_output(
 reply = committed.behavior.generated_text
 host_display(reply)
 
-affectweave.record_delivery(
+delivered = affectweave.record_delivery(
     "maya",
     packet.behavior_id,
     reply,
@@ -120,36 +108,80 @@ affectweave.record_delivery(
 )
 ```
 
-## 一轮对话如何流转
+## Context Pipeline
 
-### 1. `prepare_turn()`
+### 1. Core 生成 TurnPreparation
 
-读取人物状态、当前关系、未决事项和相关记忆，生成：
+Core 读取完整人物状态、当前关系、ActiveThread、相关记忆和当前事件，生成本轮准备数据。
 
-```python
-packet.prompt_fragment
-packet.output_schema
-packet.behavior_id
-packet.state_version
-packet.estimated_tokens
-```
-
-支持结构化输出的宿主可以分别使用提示词和 Schema：
+### 2. ContextCompiler 生成 ContextPackage
 
 ```python
-prompt = packet.prompt_fragment
-schema = packet.output_schema
+from affectweave.compiler import ContextCompiler, ContextConfig
+
+compiler = ContextCompiler(
+    ContextConfig(
+        token_budget=1200,
+        max_memories=5,
+        max_recent_turns=8,
+    )
+)
+
+context = compiler.compile(turn_preparation)
 ```
 
-只支持文本提示词的宿主可以使用：
+`ContextPackage` 包含：
+
+```text
+current_event
+character
+current_state
+relationship
+active_threads
+relevant_memories
+recent_dialogue
+response_policy
+output_contract
+budget
+trace
+```
+
+查看预算和裁剪结果：
 
 ```python
-prompt = packet.to_prompt(include_schema=True)
+context.budget.estimated_tokens
+context.budget.maximum_tokens
+context.budget.removed_sections
+context.budget.removal_reasons
 ```
 
-### 2. `commit_output()`
+### 3. Renderer 转换输出形式
 
-将宿主 AI 返回的 JSON 交给 AffectWeave：
+```python
+from affectweave.compiler import (
+    JSONRenderer,
+    MessageBlockRenderer,
+    TextPromptRenderer,
+)
+
+text = TextPromptRenderer().render(context)
+structured = JSONRenderer().render(context)
+messages = MessageBlockRenderer().render(context)
+```
+
+通过 `EnhancementPacket` 可以直接使用便利方法：
+
+```python
+packet.prompt_fragment       # 兼容属性，等同默认文本渲染
+packet.to_prompt()           # 文本提示词
+packet.to_context_json()     # ContextPackage JSON
+packet.to_messages()         # 通用消息块
+packet.output_schema         # 宿主 AI 的结构化输出 Schema
+```
+
+### 4. commit_output()
+
+宿主 AI 返回 JSON 后：
 
 ```python
 committed = affectweave.commit_output(
@@ -160,11 +192,11 @@ committed = affectweave.commit_output(
 )
 ```
 
-AffectWeave 会校验结构、执行状态限幅，并保存候选回复。
+AffectWeave 校验结构、拒绝受保护字段、执行状态限幅，并保存候选回复。
 
-### 3. `record_delivery()`
+### 5. record_delivery()
 
-回复真正显示或发送后，记录实际交付：
+回复真正显示或发送后：
 
 ```python
 delivered = affectweave.record_delivery(
@@ -175,9 +207,9 @@ delivered = affectweave.record_delivery(
 )
 ```
 
-### 4. `record_outcome()`
+### 6. record_outcome()
 
-观察到后续用户反应或明确结果后，更新关系、记忆和未决事项：
+观察到后续用户反应或明确结果后：
 
 ```python
 from affectweave.core import EvidenceLevel, OutcomeEvent, RelationshipDelta
@@ -197,9 +229,81 @@ affectweave.record_outcome(
 )
 ```
 
-## 核心状态
+## 三种上下文形式
 
-AffectWeave 长期维护以下状态：
+### 文本提示词
+
+```python
+prompt = packet.to_prompt(include_schema=True)
+```
+
+适合直接追加到宿主的系统提示词或开发者提示词。
+
+### 结构化 JSON
+
+```python
+context_json = packet.to_context_json()
+```
+
+适合自定义 Agent、工具链、跨语言宿主和调试界面。
+
+### 通用消息块
+
+```python
+messages = packet.to_messages()
+```
+
+默认输出：
+
+```json
+[
+  {
+    "role": "developer",
+    "content": "..."
+  }
+]
+```
+
+宿主可以将它映射到自己支持的指令角色。
+
+## CLI
+
+初始化人物：
+
+```bash
+affectweave --db runtime/affectweave.sqlite3 init --character maya
+```
+
+输出完整 Packet：
+
+```bash
+affectweave --db runtime/affectweave.sqlite3 prepare \
+  --character maya \
+  --actor mighon \
+  --message "Hello, Maya" \
+  --idempotency-key session-1-turn-1 \
+  --format packet
+```
+
+输出文本提示词：
+
+```bash
+affectweave ... prepare ... --format prompt
+```
+
+输出 ContextPackage JSON 与预算报告：
+
+```bash
+affectweave ... prepare ... --format context --show-budget
+```
+
+输出通用消息块：
+
+```bash
+affectweave ... prepare ... --format messages
+```
+
+## 核心状态
 
 | 状态 | 作用 |
 |---|---|
@@ -211,7 +315,7 @@ AffectWeave 长期维护以下状态：
 | Episodic Memory | 带来源和证据等级的互动记忆 |
 | Behavior | 候选回复、实际交付和后续结果 |
 
-行为证据分为：
+行为证据：
 
 | 等级 | 含义 |
 |---|---|
@@ -224,46 +328,27 @@ AffectWeave 长期维护以下状态：
 
 ### `affectweave.core`
 
-负责人物状态、状态更新规则与持久化：
+负责人物状态、更新规则、行为闭环和持久化。
 
-```python
-from affectweave.core import AffectWeaveCore, SQLiteRepository
+### `affectweave.compiler.context`
 
-repository = SQLiteRepository("runtime/affectweave.sqlite3")
-core = AffectWeaveCore(repository)
-```
+负责选择、压缩和预算管理，输出 `ContextPackage`。
 
-主要文件：
+### `affectweave.compiler.renderers`
 
-- `models.py`：人物、情绪、关系、记忆和行为数据结构。
-- `service.py`：轮次准备、状态提交、交付与结果闭环。
-- `policy.py`：数值限幅与状态更新规则。
-- `repository.py`：内存和 SQLite 仓库。
-- `serde.py`：JSON 序列化。
-- `personas.py`：示例人物定义。
+负责将 `ContextPackage` 渲染为文本、JSON 或消息块。
 
-### `affectweave.compiler`
+### `affectweave.compiler.packet`
 
-负责生成 `EnhancementPacket` 并校验宿主 AI 输出：
+定义 `ContextPackage`、`EnhancementPacket`、预算报告、追踪信息和输出 Schema。
 
-```python
-from affectweave.compiler import OutputValidator, PromptCompiler, PromptConfig
+### `affectweave.compiler.validator`
 
-compiler = PromptCompiler(PromptConfig(token_budget=1200))
-packet = compiler.compile(turn_preparation)
-
-validated = OutputValidator().parse(raw_model_json)
-```
-
-主要文件：
-
-- `packet.py`：Packet 数据结构和序列化。
-- `prompt.py`：状态筛选、提示词编译与预算裁剪。
-- `validator.py`：JSON 结构、状态提案和语言预算校验。
+负责校验宿主 AI 的结构化输出。
 
 ### `affectweave.integration`
 
-提供宿主最常用的统一入口：
+提供：
 
 ```text
 prepare_turn
@@ -272,22 +357,9 @@ record_delivery
 record_outcome
 ```
 
-```python
-from affectweave import AffectWeave
-
-affectweave = AffectWeave()
-```
-
 ### `affectweave.cli`
 
-将同一套流程提供给 Shell、编码代理和其他进程：
-
-```bash
-affectweave --db runtime/affectweave.sqlite3 init --character maya
-affectweave --db runtime/affectweave.sqlite3 prepare --character maya --actor mighon \
-  --message "Hello, Maya" --idempotency-key session-1-turn-1
-affectweave --db runtime/affectweave.sqlite3 state --character maya
-```
+向 Shell、编码代理和其他进程提供同一套工作流。
 
 ## 项目结构
 
@@ -296,6 +368,11 @@ affectweave/
 ├── src/affectweave/
 │   ├── core/
 │   ├── compiler/
+│   │   ├── context.py
+│   │   ├── packet.py
+│   │   ├── renderers.py
+│   │   ├── prompt.py
+│   │   └── validator.py
 │   ├── integration.py
 │   ├── cli.py
 │   └── __init__.py
@@ -314,17 +391,7 @@ affectweave/
 python -m pip install -e .
 python -m unittest discover -s tests -v
 python examples/basic_host.py
+python examples/rendering_formats.py
 ```
 
-提交代码前请确保测试通过。贡献流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
-
-## 版本
-
-- GitHub Release / Tag：`v0.1-demo`
-- Python 包版本：`0.1.0.dev0`
-
-Python 包使用 PEP 440 兼容版本号；GitHub 对外版本使用更直观的 Demo 标签。
-
-## License
-
-本项目采用 [MIT License](LICENSE)。
+贡献流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
