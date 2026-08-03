@@ -8,7 +8,7 @@
 - 新增 `ContextCompiler` 与 `ContextConfig`；
 - 支持文本提示词、Context JSON 和通用消息块；
 - 新增上下文预算、裁剪记录和编译追踪；
-- 保留 `PromptCompiler`、`packet.prompt_fragment` 和原有完整闭环；
+- 保留 `PromptCompiler`、`packet.prompt_fragment`、旧 Packet 读取与原有行为反馈流程；
 - Core、SQLite 数据结构与状态更新行为保持不变；
 - 自动测试扩展至 28 项。
 

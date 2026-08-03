@@ -58,6 +58,10 @@ package.budget.removed_sections
 package.budget.removal_reasons
 ```
 
+This report describes the provider-neutral estimate used while selecting the
+canonical context, including configured renderer overhead. It does not claim an
+exact provider token count for every serialized form.
+
 ## Trace
 
 `ContextTrace` identifies the compiler version, source event and source state version used to build the package.
@@ -78,7 +82,15 @@ from affectweave.compiler import (
     TextPromptRenderer,
 )
 
-text = TextPromptRenderer().render(package)
-json_context = JSONRenderer().render(package)
-messages = MessageBlockRenderer().render(package)
+text_rendering = TextPromptRenderer().render(package)
+json_rendering = JSONRenderer().render(package)
+message_rendering = MessageBlockRenderer().render(package)
+
+text = text_rendering.content
+json_context = json_rendering.content
+messages = message_rendering.content
+estimated_tokens = message_rendering.estimated_tokens
 ```
+
+Every renderer returns a `RenderedContext` with `format`, `content`,
+`estimated_tokens` and `renderer_version`.

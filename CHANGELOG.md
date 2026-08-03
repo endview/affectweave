@@ -12,7 +12,7 @@ Context Pipeline release.
 - Added auditable context budget and trimming reports.
 - Added Context trace metadata.
 - Added CLI rendering formats and budget output.
-- Preserved the v0.1 host lifecycle and packet compatibility.
+- Preserved the v0.1 host lifecycle, compatibility accessors and legacy packet loading.
 - Expanded the automated suite to 28 tests.
 
 ## v0.1-demo — 2026-08-02

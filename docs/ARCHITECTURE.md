@@ -21,7 +21,7 @@ EnhancementPacket
 Host AI
 ```
 
-The complete feedback loop is:
+The host-reported behavior lifecycle is:
 
 ```text
 prepare_turn
@@ -35,7 +35,7 @@ prepare_turn
 
 ### `affectweave.core`
 
-Owns persistent state and deterministic rules:
+Owns persistent state and deterministic storage, clamping, decay and lifecycle rules:
 
 - frozen Persona;
 - medium-term state;
@@ -46,7 +46,7 @@ Owns persistent state and deterministic rules:
 - behavior records;
 - clamping, versions and idempotency;
 - JSON and SQLite persistence;
-- L0/L1/L2/L3 closure.
+- L0/L1/L2/L3 lifecycle and host-submitted outcome application.
 
 ### `affectweave.compiler.context`
 
@@ -70,7 +70,7 @@ Owns output formatting:
 - `JSONRenderer`;
 - `MessageBlockRenderer`.
 
-Renderers receive one immutable context package and do not modify Core state.
+Renderers treat each context package as read-only and do not modify Core state.
 
 ### `affectweave.compiler.packet`
 
@@ -94,7 +94,7 @@ Coordinates Core, ContextCompiler, Renderer and Validator through the public lif
 ```text
 core        -> Python standard library
 context     -> core + packet
-renderers   -> context package
+renderers   -> context + packet
 validator   -> core data types
 integration -> core + compiler
 cli         -> integration
@@ -103,7 +103,9 @@ host        -> integration or cli
 
 ## 4. Budgeting
 
-The compiler uses a provider-neutral token estimate. It preserves the current event and base ActiveThread fields, then removes optional content in this order:
+The compiler uses a provider-neutral estimate for the canonical context selection.
+It preserves the current event and base ActiveThread fields, then removes optional
+content in this order:
 
 1. voice notes and contradictions;
 2. lowest-priority memories;
@@ -122,6 +124,20 @@ included_sections
 removed_sections
 removal_reasons
 ```
+
+`ContextBudgetReport.estimated_tokens` covers the canonical context plus the
+configured renderer overhead. Each renderer also reports the estimate for its
+actual output:
+
+```python
+rendered = packet.render("messages")
+rendered.estimated_tokens
+```
+
+`packet.estimated_tokens` describes the Packet's default rendering. A host that
+switches format should use the returned `RenderedContext.estimated_tokens`.
+Appending the output schema with `to_prompt(include_schema=True)` adds content
+outside the canonical context budget.
 
 ## 5. EnhancementPacket
 
@@ -145,4 +161,8 @@ packet.to_json()          # full packet serialization
 
 ## 6. Compatibility
 
-`PromptCompiler` and `PromptConfig` remain as compatibility wrappers around `ContextCompiler` and `ContextConfig`. Existing hosts can continue using `packet.prompt_fragment` and full packet JSON serialization.
+`PromptCompiler` and `PromptConfig` remain as compatibility wrappers around
+`ContextCompiler` and `ContextConfig`. `packet.prompt_fragment` remains a text
+accessor, and `EnhancementPacket.from_dict()` / `from_json()` can load legacy
+v0.1 packets. The v0.2 constructor and serialized ContextPackage layout are the
+new canonical contract.

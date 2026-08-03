@@ -7,9 +7,9 @@
 
 **Give AI characters emotional continuity.**
 
-AffectWeave 是一个持续人物状态与上下文增强引擎。它长期维护人物的人格、情绪、关系、记忆和未完成事件，并在每轮对话前，将当前相关状态编译为紧凑的 `ContextPackage`。
+AffectWeave 是一个持续人物状态与上下文增强引擎。它长期维护稳定的 Persona 基线，以及可变的中期状态、情绪、关系、记忆和未完成事件，并在每轮对话前，将当前相关状态编译为紧凑的 `ContextPackage`。
 
-同一份 `ContextPackage` 可以渲染为文本提示词、结构化 JSON 或通用消息块，再交给宿主已有的 AI。宿主返回结构化结果后，AffectWeave 校验状态变化，并根据实际交付和后续结果持续更新人物轨迹。
+同一份 `ContextPackage` 可以渲染为文本提示词、结构化 JSON 或通用消息块，再交给宿主已有的 AI。宿主返回结构化结果后，AffectWeave 校验状态变化，并根据宿主报告的实际交付和后续结果持续更新人物轨迹。
 
 ```mermaid
 flowchart LR
@@ -35,7 +35,7 @@ flowchart LR
 - **多格式渲染**：将同一份上下文渲染为文本提示词、JSON 或通用消息块。
 - **裁剪审计**：记录上下文预算、包含内容、删除内容和删除原因。
 - **结构化状态提案**：校验宿主 AI 返回的 JSON，并限幅情绪、关系和中期状态变化。
-- **真实行为闭环**：区分候选回复、实际交付、观察结果和确认结果。
+- **行为反馈闭环**：区分候选回复、实际交付、观察结果和确认结果。
 - **状态持久化**：支持内存仓库和 SQLite。
 
 ## 5 分钟本地验证
@@ -85,6 +85,7 @@ prompt = packet.to_prompt()
 context_json = packet.to_context_json()
 message_blocks = packet.to_messages()
 
+# 以下函数由宿主应用提供。
 raw_output = host_ai_generate_json(
     prompt=prompt,
     output_schema=packet.output_schema,
@@ -116,18 +117,10 @@ Core 读取完整人物状态、当前关系、ActiveThread、相关记忆和当
 
 ### 2. ContextCompiler 生成 ContextPackage
 
+上例返回的 Packet 已包含本轮编译结果：
+
 ```python
-from affectweave.compiler import ContextCompiler, ContextConfig
-
-compiler = ContextCompiler(
-    ContextConfig(
-        token_budget=1200,
-        max_memories=5,
-        max_recent_turns=8,
-    )
-)
-
-context = compiler.compile(turn_preparation)
+context = packet.context_package
 ```
 
 `ContextPackage` 包含：
@@ -164,15 +157,15 @@ from affectweave.compiler import (
     TextPromptRenderer,
 )
 
-text = TextPromptRenderer().render(context)
-structured = JSONRenderer().render(context)
-messages = MessageBlockRenderer().render(context)
+text = TextPromptRenderer().render(context).content
+structured = JSONRenderer().render(context).content
+messages = MessageBlockRenderer().render(context).content
 ```
 
 通过 `EnhancementPacket` 可以直接使用便利方法：
 
 ```python
-packet.prompt_fragment       # 兼容属性，等同默认文本渲染
+packet.prompt_fragment       # 兼容属性，始终返回文本提示词
 packet.to_prompt()           # 文本提示词
 packet.to_context_json()     # ContextPackage JSON
 packet.to_messages()         # 通用消息块
@@ -328,7 +321,7 @@ affectweave ... prepare ... --format messages
 
 ### `affectweave.core`
 
-负责人物状态、更新规则、行为闭环和持久化。
+负责人物状态、更新规则、行为生命周期和持久化。
 
 ### `affectweave.compiler.context`
 
@@ -395,3 +388,9 @@ python examples/rendering_formats.py
 ```
 
 贡献流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+
+## 版本与许可
+
+- GitHub Tag：`v0.2-demo`
+- Python Package：`0.2.0.dev0`
+- License：[MIT](LICENSE)

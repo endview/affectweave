@@ -1,114 +1,107 @@
-# Publish AffectWeave to GitHub
+# Sync AffectWeave v0.2-demo to GitHub
 
-This guide publishes AffectWeave as a brand-new public repository.
+Target repository: [endview/affectweave](https://github.com/endview/affectweave)
 
-## 1. Prerequisites
+The public repository already contains `v0.1-demo`. Publish `v0.2-demo` as a
+normal fast-forward and keep both release tags unchanged.
 
-Install Git and GitHub CLI, then authenticate:
+## 1. Verify the release baseline
 
 ```bash
-gh auth login
+git status --short --branch
+git rev-parse v0.2-demo^{commit}
+python -m unittest discover -s tests -v
+python examples/basic_host.py
+python examples/rendering_formats.py
+```
+
+Expected release commit:
+
+```text
+69ae0c3c7f7718b0b4eaa834696e49294dd49950
+```
+
+## 2. Connect the GitHub remote
+
+```bash
 gh auth status
 ```
 
-## 2. Create the repository
+A repository restored from the migration bundle has a local bundle path as
+`origin`. Preserve it as a migration archive and add GitHub separately:
 
-Recommended repository name:
+```bash
+git remote rename origin migration-bundle
+git remote add github https://github.com/endview/affectweave.git
+git fetch github refs/heads/main:refs/remotes/github/main
+git ls-remote --tags github
+```
+
+If the GitHub remote already exists, inspect it instead of adding it again:
+
+```bash
+git remote -v
+```
+
+## 3. Compare before publishing
+
+```bash
+git merge-base --is-ancestor github/main v0.2-demo
+git log --oneline --graph --decorate --all -12
+git diff --stat github/main..v0.2-demo
+```
+
+The ancestor check must succeed. Do not force-push a diverged remote.
+
+## 4. Publish the release commit and tag
+
+Push the exact tagged commit first, then the annotated tag:
+
+```bash
+git push github 69ae0c3c7f7718b0b4eaa834696e49294dd49950:refs/heads/main
+git push github refs/tags/v0.2-demo:refs/tags/v0.2-demo
+```
+
+Documentation-only commits created after the release tag can then advance
+`main` without moving `v0.2-demo`:
+
+```bash
+git push -u github main
+```
+
+## 5. Create the GitHub Release
+
+Use the existing `v0.2-demo` tag; do not ask the Release UI to create a new tag.
+The wheel is stored in the migration package outside the Git repository:
 
 ```text
-affectweave
+release-assets/affectweave-0.2.0.dev0-py3-none-any.whl
 ```
 
-Using GitHub CLI:
-
-```bash
-gh repo create affectweave \
-  --public \
-  --description "Persistent affect, relationships, and character continuity for AI systems." \
-  --source . \
-  --remote origin
-```
-
-The repository already includes README, MIT License, `.gitignore`, issue templates,
-GitHub Actions, contribution guidance, and release notes.
-
-## 3. Push `main`
-
-```bash
-git push -u origin main
-```
-
-## 4. Push the demo tag
-
-```bash
-git push origin v0.2-demo
-```
-
-## 5. Create the first release
-
-Attach the wheel from the submission package:
+From the Git repository root, use the current `RELEASE_NOTES.md` and point to the
+wheel in the adjacent migration package:
 
 ```bash
 gh release create v0.2-demo \
-  release-assets/affectweave-0.2.0.dev0-py3-none-any.whl \
+  ../AffectWeave_Codex_Migration_v0.2-demo/release-assets/affectweave-0.2.0.dev0-py3-none-any.whl \
+  --repo endview/affectweave \
   --title "AffectWeave v0.2-demo" \
   --notes-file RELEASE_NOTES.md
 ```
 
-## 6. Configure repository metadata
-
-Suggested GitHub description:
-
-```text
-Persistent affect, relationships, and character continuity for AI systems.
-```
-
-Suggested topics:
-
-```text
-llm
-affective-computing
-ai-character
-emotion
-memory
-character-continuity
-context-engineering
-state-management
-chatbot
-roleplay
-```
-
-Using GitHub CLI:
+## 6. Verify the publication
 
 ```bash
-gh repo edit --description "Persistent affect, relationships, and character continuity for AI systems."
-
-gh repo edit --add-topic llm \
-  --add-topic affective-computing \
-  --add-topic ai-character \
-  --add-topic emotion \
-  --add-topic memory \
-  --add-topic character-continuity \
-  --add-topic context-engineering \
-  --add-topic state-management \
-  --add-topic chatbot \
-  --add-topic roleplay
-```
-
-## 7. Verify the publication
-
-Check:
-
-```bash
-gh repo view --web
-gh release view v0.2-demo
-gh run list --limit 5
+gh repo view endview/affectweave --web
+gh release view v0.2-demo --repo endview/affectweave
+gh run list --repo endview/affectweave --limit 5
 ```
 
 Confirm that:
 
-- `main` is the default branch;
-- the `v0.2-demo` tag is visible;
-- the first release contains the wheel;
-- GitHub Actions completes the Python test matrix;
-- README badges and links render correctly.
+- `main` contains the v0.2 Context Pipeline;
+- `v0.1-demo` still resolves to `0f49aa3`;
+- `v0.2-demo` resolves to `69ae0c3`;
+- the release contains `affectweave-0.2.0.dev0-py3-none-any.whl`;
+- GitHub Actions passes on Python 3.11, 3.12 and 3.13;
+- README, Mermaid diagrams and documentation links render correctly.
