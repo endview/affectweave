@@ -1,4 +1,4 @@
-"""AffectWeave: persistent character state and prompt enhancement for AI hosts."""
+"""AffectWeave: persistent character state and context enhancement for AI hosts."""
 
 from . import compiler, core
 from .integration import CommitResult, DeliveryResult, AffectWeave

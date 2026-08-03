@@ -1,16 +1,16 @@
-# AffectWeave v0.1-demo
+# AffectWeave v0.2-demo — Context Pipeline
 
-首个公开演示版本。
+本版本将状态选择与提示词渲染正式拆分。
 
 ## Highlights
 
-- 持续维护人物人格、中期状态、情绪、关系与未完成事件；
-- 每轮生成紧凑的 `EnhancementPacket`；
-- 保存与具体原因和对象绑定的情绪实例；
-- 跟踪人物与不同交流对象的关系状态；
-- 区分候选回复、实际交付和后续结果；
-- 支持内存与 SQLite 持久化；
-- 提供 Python API、CLI 和完整宿主示例。
+- 新增标准化 `ContextPackage`；
+- 新增 `ContextCompiler` 与 `ContextConfig`；
+- 支持文本提示词、Context JSON 和通用消息块；
+- 新增上下文预算、裁剪记录和编译追踪；
+- 保留 `PromptCompiler`、`packet.prompt_fragment` 和原有完整闭环；
+- Core、SQLite 数据结构与状态更新行为保持不变；
+- 自动测试扩展至 28 项。
 
 ## Quick verification
 
@@ -18,10 +18,11 @@
 python -m pip install -e .
 python -m unittest discover -s tests -v
 python examples/basic_host.py
+python examples/rendering_formats.py
 ```
 
 ## Release asset
 
 ```text
-affectweave-0.1.0.dev0-py3-none-any.whl
+affectweave-0.2.0.dev0-py3-none-any.whl
 ```

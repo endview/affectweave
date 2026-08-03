@@ -4,15 +4,22 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping, Sequence
 
-from .compiler import EnhancementPacket, OutputValidator, PromptCompiler
+from .compiler import (
+    ContextCompiler,
+    ContextRenderer,
+    EnhancementPacket,
+    OutputValidator,
+    PromptCompiler,
+    TextPromptRenderer,
+)
 from .core import (
+    AffectWeaveCore,
     BehaviorRecord,
     CharacterState,
     DeliveryReceipt,
     DialogueTurn,
     InputEvent,
     OutcomeEvent,
-    AffectWeaveCore,
     StateRepository,
     text_hash,
     utc_now,
@@ -35,10 +42,9 @@ class DeliveryResult:
 class AffectWeave:
     """Passive integration facade for any AI host.
 
-    This class never invokes a model. A host calls ``prepare_turn()``, injects
-    the returned packet into its own model, then submits the model JSON through
-    ``commit_output()``. Actual delivery and observed outcomes are reported
-    separately so generated text cannot masquerade as completed behavior.
+    ``prepare_turn()`` compiles a host-neutral context package and selects a
+    default rendering. The host invokes its own model, submits the structured
+    result through ``commit_output()``, and reports delivery/outcome separately.
     """
 
     def __init__(
@@ -46,14 +52,34 @@ class AffectWeave:
         repository: StateRepository | None = None,
         *,
         core: AffectWeaveCore | None = None,
-        compiler: PromptCompiler | None = None,
+        context_compiler: ContextCompiler | None = None,
+        renderer: ContextRenderer | None = None,
         validator: OutputValidator | None = None,
+        compiler: PromptCompiler | ContextCompiler | None = None,
     ) -> None:
         if core is not None and repository is not None:
             raise ValueError("pass either core or repository, not both")
+        if context_compiler is not None and compiler is not None:
+            raise ValueError("pass either context_compiler or compiler, not both")
+
+        selected_compiler = context_compiler
+        if selected_compiler is None and compiler is not None:
+            selected_compiler = (
+                compiler.context_compiler
+                if isinstance(compiler, PromptCompiler)
+                else compiler
+            )
+
         self.core = core or AffectWeaveCore(repository)
-        self.compiler = compiler or PromptCompiler()
+        self.context_compiler = selected_compiler or ContextCompiler()
+        self.renderer = renderer or TextPromptRenderer()
         self.validator = validator or OutputValidator()
+
+    @property
+    def compiler(self) -> ContextCompiler:
+        """Compatibility access to the active context compiler."""
+
+        return self.context_compiler
 
     def create_character(self, character_id: str, *, persona, medium=None, now=None) -> CharacterState:
         return self.core.create_character(
@@ -75,6 +101,7 @@ class AffectWeave:
         expected_state_version: int | None = None,
         recent_dialogue: Sequence[DialogueTurn] = (),
         token_budget: int | None = None,
+        render_format: str | None = None,
     ) -> EnhancementPacket:
         expected = (
             self.core.get_state(character_id).version
@@ -88,7 +115,17 @@ class AffectWeave:
             expected_state_version=expected,
             recent_dialogue=recent_dialogue,
         )
-        return self.compiler.compile(preparation, token_budget=token_budget)
+        context = self.context_compiler.compile(
+            preparation,
+            token_budget=token_budget,
+        )
+        if render_format is None:
+            default_rendering = self.renderer.render(context)
+            return EnhancementPacket(
+                context_package=context,
+                default_rendering=default_rendering,
+            )
+        return EnhancementPacket.from_context(context, render_format=render_format)
 
     def commit_output(
         self,

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2-demo — 2026-08-03
+
+Context Pipeline release.
+
+### Features
+
+- Added host-neutral `ContextPackage`.
+- Split context selection from output rendering.
+- Added text, JSON and generic message-block renderers.
+- Added auditable context budget and trimming reports.
+- Added Context trace metadata.
+- Added CLI rendering formats and budget output.
+- Preserved the v0.1 host lifecycle and packet compatibility.
+- Expanded the automated suite to 28 tests.
+
 ## v0.1-demo — 2026-08-02
 
 Initial public demo.
