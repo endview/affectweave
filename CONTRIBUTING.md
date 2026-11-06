@@ -10,10 +10,10 @@
 4. 运行：
 
 ```bash
-python -m pip install -e .
-python -m unittest discover -s tests -v
-python examples/basic_host.py
-python examples/rendering_formats.py
+go test -race ./internal/affect
+go vet ./...
+# 使用 FreeAgent 的独立 PG 测试服务运行完整集成测试：
+python <FreeAgent>/scripts/test-postgres.py --runtime <PG15运行时> -- go test -race ./...
 ```
 
 5. 提交 Pull Request，并说明问题、实现方式和测试结果。

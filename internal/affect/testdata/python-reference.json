@@ -1,0 +1,356 @@
+{
+  "reference_commit": "d8be9d3255006c51a96c114e36949771ae26517c",
+  "tolerance": 1e-12,
+  "cases": [
+    {
+      "name": "bounded",
+      "proposals": [
+        {
+          "intent_hypotheses": [],
+          "focus": [],
+          "medium_delta": {
+            "valence": -0.2,
+            "activation": 0.0,
+            "energy": -1,
+            "stress": 0.2,
+            "energy_evidence": false
+          },
+          "emotion_deltas": [
+            {
+              "emotion": "anger",
+              "cause_id": "cause",
+              "cause_summary": "crossed boundary",
+              "target_id": "owner",
+              "delta": 0.8,
+              "confidence": 0.9,
+              "unresolvedness": 0.8
+            }
+          ],
+          "relationship_delta": {
+            "familiarity": 0.0,
+            "trust": -0.5,
+            "warmth": 0.0,
+            "reliability": 0.0,
+            "conflict": 0.7,
+            "stance": "guarded"
+          },
+          "thread_proposals": [],
+          "memory_candidates": [],
+          "reason_codes": []
+        }
+      ],
+      "advance_seconds": 0,
+      "expected": {
+        "medium": {
+          "valence": -0.05,
+          "activation": 0.3,
+          "energy": 0.6,
+          "stress": 0.25
+        },
+        "relationship": {
+          "familiarity": 0.05,
+          "trust": 0.45,
+          "warmth": 0.5,
+          "reliability": 0.5,
+          "conflict": 0.05,
+          "stance": "guarded"
+        },
+        "emotions": {
+          "cause:anger": 0.25
+        },
+        "threads": {}
+      }
+    },
+    {
+      "name": "coexisting",
+      "proposals": [
+        {
+          "intent_hypotheses": [],
+          "focus": [],
+          "medium_delta": {
+            "valence": 0.0,
+            "activation": 0.0,
+            "energy": 0.0,
+            "stress": 0.0,
+            "energy_evidence": false
+          },
+          "emotion_deltas": [
+            {
+              "emotion": "anger",
+              "cause_id": "a",
+              "cause_summary": "first",
+              "target_id": "owner",
+              "delta": 0.2,
+              "confidence": 0.9,
+              "unresolvedness": 0.8
+            },
+            {
+              "emotion": "joy",
+              "cause_id": "b",
+              "cause_summary": "second",
+              "target_id": "owner",
+              "delta": 0.2,
+              "confidence": 0.9,
+              "unresolvedness": 0.2
+            }
+          ],
+          "relationship_delta": {
+            "familiarity": 0.0,
+            "trust": 0.0,
+            "warmth": 0.0,
+            "reliability": 0.0,
+            "conflict": 0.0,
+            "stance": null
+          },
+          "thread_proposals": [],
+          "memory_candidates": [],
+          "reason_codes": []
+        }
+      ],
+      "advance_seconds": 0,
+      "expected": {
+        "medium": {
+          "valence": 0.0,
+          "activation": 0.3,
+          "energy": 0.6,
+          "stress": 0.2
+        },
+        "relationship": {
+          "familiarity": 0.05,
+          "trust": 0.5,
+          "warmth": 0.5,
+          "reliability": 0.5,
+          "conflict": 0.0,
+          "stance": "open"
+        },
+        "emotions": {
+          "a:anger": 0.2,
+          "b:joy": 0.2
+        },
+        "threads": {}
+      }
+    },
+    {
+      "name": "residual",
+      "proposals": [
+        {
+          "intent_hypotheses": [],
+          "focus": [],
+          "medium_delta": {
+            "valence": 0.0,
+            "activation": 0.0,
+            "energy": 0.0,
+            "stress": 0.0,
+            "energy_evidence": false
+          },
+          "emotion_deltas": [
+            {
+              "emotion": "fear",
+              "cause_id": "thread",
+              "cause_summary": "unresolved",
+              "target_id": "owner",
+              "delta": 0.25,
+              "confidence": 0.9,
+              "unresolvedness": 0.5
+            }
+          ],
+          "relationship_delta": {
+            "familiarity": 0.0,
+            "trust": 0.0,
+            "warmth": 0.0,
+            "reliability": 0.0,
+            "conflict": 0.0,
+            "stance": null
+          },
+          "thread_proposals": [
+            {
+              "action": "upsert",
+              "thread_id": "thread",
+              "kind": "concern",
+              "summary": "unresolved",
+              "importance": 0.8,
+              "unresolvedness_delta": 0.5,
+              "completion_condition": "",
+              "related_entities": [],
+              "confidence": 0.9
+            }
+          ],
+          "memory_candidates": [],
+          "reason_codes": []
+        }
+      ],
+      "advance_seconds": 3600,
+      "expected": {
+        "medium": {
+          "valence": 0.0,
+          "activation": 0.3,
+          "energy": 0.6,
+          "stress": 0.2
+        },
+        "relationship": {
+          "familiarity": 0.05,
+          "trust": 0.5,
+          "warmth": 0.5,
+          "reliability": 0.5,
+          "conflict": 0.0,
+          "stance": "open"
+        },
+        "emotions": {
+          "thread:fear": 0.1678243273522875
+        },
+        "threads": {
+          "thread": {
+            "unresolvedness": 0.5,
+            "status": "active"
+          }
+        }
+      }
+    },
+    {
+      "name": "energy_evidence",
+      "proposals": [
+        {
+          "intent_hypotheses": [],
+          "focus": [],
+          "medium_delta": {
+            "valence": 0.0,
+            "activation": 0.0,
+            "energy": -1,
+            "stress": 0.0,
+            "energy_evidence": true
+          },
+          "emotion_deltas": [],
+          "relationship_delta": {
+            "familiarity": 0.0,
+            "trust": 0.0,
+            "warmth": 0.0,
+            "reliability": 0.0,
+            "conflict": 0.0,
+            "stance": null
+          },
+          "thread_proposals": [],
+          "memory_candidates": [],
+          "reason_codes": []
+        }
+      ],
+      "advance_seconds": 0,
+      "expected": {
+        "medium": {
+          "valence": 0.0,
+          "activation": 0.3,
+          "energy": 0.5499999999999999,
+          "stress": 0.2
+        },
+        "relationship": {
+          "familiarity": 0.05,
+          "trust": 0.5,
+          "warmth": 0.5,
+          "reliability": 0.5,
+          "conflict": 0.0,
+          "stance": "open"
+        },
+        "emotions": {},
+        "threads": {}
+      }
+    },
+    {
+      "name": "resolution",
+      "proposals": [
+        {
+          "intent_hypotheses": [],
+          "focus": [],
+          "medium_delta": {
+            "valence": 0.0,
+            "activation": 0.0,
+            "energy": 0.0,
+            "stress": 0.0,
+            "energy_evidence": false
+          },
+          "emotion_deltas": [],
+          "relationship_delta": {
+            "familiarity": 0.0,
+            "trust": 0.0,
+            "warmth": 0.0,
+            "reliability": 0.0,
+            "conflict": 0.0,
+            "stance": null
+          },
+          "thread_proposals": [
+            {
+              "action": "upsert",
+              "thread_id": "t",
+              "kind": "concern",
+              "summary": "waiting",
+              "importance": 0.8,
+              "unresolvedness_delta": 0.9,
+              "completion_condition": "",
+              "related_entities": [],
+              "confidence": 0.9
+            }
+          ],
+          "memory_candidates": [],
+          "reason_codes": []
+        },
+        {
+          "intent_hypotheses": [],
+          "focus": [],
+          "medium_delta": {
+            "valence": 0.0,
+            "activation": 0.0,
+            "energy": 0.0,
+            "stress": 0.0,
+            "energy_evidence": false
+          },
+          "emotion_deltas": [],
+          "relationship_delta": {
+            "familiarity": 0.0,
+            "trust": 0.0,
+            "warmth": 0.0,
+            "reliability": 0.0,
+            "conflict": 0.0,
+            "stance": null
+          },
+          "thread_proposals": [
+            {
+              "action": "resolve",
+              "thread_id": "t",
+              "kind": "concern",
+              "summary": "",
+              "importance": 0.5,
+              "unresolvedness_delta": 0.0,
+              "completion_condition": "",
+              "related_entities": [],
+              "confidence": 0.5
+            }
+          ],
+          "memory_candidates": [],
+          "reason_codes": []
+        }
+      ],
+      "advance_seconds": 0,
+      "expected": {
+        "medium": {
+          "valence": 0.0,
+          "activation": 0.3,
+          "energy": 0.6,
+          "stress": 0.2
+        },
+        "relationship": {
+          "familiarity": 0.05,
+          "trust": 0.5,
+          "warmth": 0.5,
+          "reliability": 0.5,
+          "conflict": 0.0,
+          "stance": "open"
+        },
+        "emotions": {},
+        "threads": {
+          "t": {
+            "unresolvedness": 0.7,
+            "status": "active"
+          }
+        }
+      }
+    }
+  ]
+}

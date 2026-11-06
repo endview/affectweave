@@ -1,0 +1,25 @@
+{
+  "protocol": "freeagent-ext/1",
+  "id": "cc.endview.affectweave",
+  "version": "1.0.0-dev.1",
+  "name": "AffectWeave",
+  "description": "可选的人物、关系与经历连续性。持久提案必须确认，普通 Core 不依赖本扩展。",
+  "run": {"command": "./affectweave"},
+  "state": true,
+  "passive_context": true,
+  "storage": "postgresql",
+  "needs": [],
+  "context": {"phases": ["turn"], "purposes": ["chat"], "max_chars": 6000, "placement": ["tail"]},
+  "events": ["turn.finished"],
+  "settings_schema": {
+    "type": "object",
+    "properties": {
+      "role_id": {"type": "string", "maxLength": 128},
+      "context_bytes": {"type": "integer", "minimum": 1024, "maximum": 24000}
+    },
+    "additionalProperties": false
+  },
+  "model_settings": ["role_id", "context_bytes"],
+  "timeout_ms": 5000,
+  "required": false
+}

@@ -1,29 +1,40 @@
-name: tests
-
-on:
-  push:
-  pull_request:
-
+name: Go extension tests
+on: [push, pull_request]
 permissions:
   contents: read
-
 jobs:
   test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:15.19
+        env:
+          POSTGRES_PASSWORD: isolated_ci_password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 3s --health-retries 12
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install
-        run: python -m pip install .
-      - name: Unit tests
-        run: python -m unittest discover -s tests -v
-      - name: Host examples
+          go-version-file: go.mod
+          cache: true
+      - run: go mod verify
+      - run: go vet ./...
+      - name: Real isolated PG and race tests
+        env:
+          FREEAGENT_PG_SERVICE_FILE: /tmp/affectweave-ci-service.json
         run: |
-          python examples/basic_host.py
-          python examples/rendering_formats.py
+          python3 - <<'PY'
+          import os,json
+          p=os.environ['FREEAGENT_PG_SERVICE_FILE']
+          with open(p,'w') as f:json.dump({'host':'127.0.0.1','port':5432,'user':'postgres','password':'isolated_ci_password','database':'postgres'},f)
+          os.chmod(p,0o600)
+          PY
+          go test -race -count=1 ./...
+          rm /tmp/affectweave-ci-service.json
+      - name: Build both standalone programs
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/affectweave ./cmd/affectweave
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o /tmp/affectweave.exe ./cmd/affectweave

@@ -1,396 +1,58 @@
-# AffectWeave
+# AffectWeave for FreeAgent
 
-![Release](https://img.shields.io/badge/release-v0.2--demo-orange)
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-public%20demo-lightgrey)
+可选的人物、关系与经历连续性扩展。当前为 **1.0.0-dev.1 Go 开发候选**，面向 FreeAgent v8.3；实际验收与未运行项见 FreeAgent 的版本报告。生产只运行 Go 程序，不安装 Python、Node 或 Go。
 
-**Give AI characters emotional continuity.**
+- Core 负责回答、工具、权限、上下文总预算和确认；AffectWeave 只提供有界人物数据。
+- 人物基线、心境、共存的原因情绪、关系与未决事件保存在独立 PostgreSQL 数据库和受限角色中。Core 的数据库和模型凭据不交给扩展。
+- 同一已采用输入只推进一次；工具后调用、模型替代与重连读取同一冻结版本。按 Core、空间、人物和参与者隔离，同空间跨会话连续。
+- 模型提出的长期变化先预览、再确认；未批准不改变关系或经历。发送成功、部分、失败和 UNKNOWN 分开，生成不等于送达或已读。
+- 未启用时没有扩展进程或分析请求。显式启用的被动人物片段可用于 None 聊天，仍不授予模型、工具或工作区 Host API。
 
-AffectWeave 是一个持续人物状态与上下文增强引擎。它长期维护稳定的 Persona 基线，以及可变的中期状态、情绪、关系、记忆和未完成事件，并在每轮对话前，将当前相关状态编译为紧凑的 `ContextPackage`。
+## 安装
 
-同一份 `ContextPackage` 可以渲染为文本提示词、结构化 JSON 或通用消息块，再交给宿主已有的 AI。宿主返回结构化结果后，AffectWeave 校验状态变化，并根据宿主报告的实际交付和后续结果持续更新人物轨迹。
+1. 从同次 Release 下载系统对应的 AffectWeave 归档，解压。
+2. 在 FreeAgent 的“设置 → 能力 → 扩展”导入其中的 `cc.endview.affectweave` 文件夹。
+3. 点击“初始化独立 PostgreSQL 存储”，再开启“全局启用”。这是显式维护操作，只创建扩展数据库，不改 Core 对话库。
+4. 在人物管理页填写名字、身份、边界和允许使用的空间，预览后批准。选择刚创建的人物，预览设为默认；也可在输入区的“本轮能力”选择人物。
+5. 开始新一轮对话。普通回答仍由 FreeAgent 已配置的模型生成，没有额外分析调用。
 
-```mermaid
-flowchart LR
-    U[用户消息] --> C[AffectWeave Core]
-    C --> CC[Context Compiler]
-    CC --> CP[ContextPackage]
-    CP --> T[Text Prompt]
-    CP --> J[JSON]
-    CP --> M[Message Blocks]
-    T --> H[宿主 AI]
-    J --> H
-    M --> H
-    H --> V[输出校验与状态更新]
-    V --> D[实际交付]
-    D --> O[结果反馈]
-    O --> C
-```
+首次人物状态在第一条已采用输入到达后生成。关闭扩展保留数据；重新启用继续使用。移除程序不等于删除独立数据库。重置人物、删除本空间状态、删除经历或删除人物都先显示具体变更。
 
-## AffectWeave 能做什么
-
-- **持续人物状态**：维护 Persona、中期状态、情绪实例、关系、ActiveThread 和情节记忆。
-- **上下文编译**：从完整状态中选择当前相关内容，生成有预算限制的 `ContextPackage`。
-- **多格式渲染**：将同一份上下文渲染为文本提示词、JSON 或通用消息块。
-- **裁剪审计**：记录上下文预算、包含内容、删除内容和删除原因。
-- **结构化状态提案**：校验宿主 AI 返回的 JSON，并限幅情绪、关系和中期状态变化。
-- **行为反馈闭环**：区分候选回复、实际交付、观察结果和确认结果。
-- **状态持久化**：支持内存仓库和 SQLite。
-
-## 5 分钟本地验证
-
-```bash
-python -m pip install -e .
-python -m unittest discover -s tests -v
-python examples/basic_host.py
-python examples/rendering_formats.py
-```
-
-## 最小 Python 接入
-
-```python
-from datetime import datetime, timezone
-
-from affectweave import AffectWeave
-from affectweave.core import (
-    InputEvent,
-    make_maya_bennett_medium,
-    make_maya_bennett_persona,
-)
-
-now = datetime.now(timezone.utc)
-affectweave = AffectWeave()
-
-state = affectweave.create_character(
-    "maya",
-    persona=make_maya_bennett_persona(),
-    medium=make_maya_bennett_medium(now),
-    now=now,
-)
-
-packet = affectweave.prepare_turn(
-    "maya",
-    InputEvent(
-        actor_id="mighon",
-        message="Hello, Maya.",
-        occurred_at=now,
-    ),
-    idempotency_key="turn-1:prepare",
-    expected_state_version=state.version,
-)
-
-# 选择适合宿主的上下文形式。
-prompt = packet.to_prompt()
-context_json = packet.to_context_json()
-message_blocks = packet.to_messages()
-
-# 以下函数由宿主应用提供。
-raw_output = host_ai_generate_json(
-    prompt=prompt,
-    output_schema=packet.output_schema,
-)
-
-committed = affectweave.commit_output(
-    "maya",
-    packet,
-    raw_output,
-    idempotency_key="turn-1:commit",
-)
-
-reply = committed.behavior.generated_text
-host_display(reply)
-
-delivered = affectweave.record_delivery(
-    "maya",
-    packet.behavior_id,
-    reply,
-    idempotency_key="turn-1:delivery",
-)
-```
-
-## Context Pipeline
-
-### 1. Core 生成 TurnPreparation
-
-Core 读取完整人物状态、当前关系、ActiveThread、相关记忆和当前事件，生成本轮准备数据。
-
-### 2. ContextCompiler 生成 ContextPackage
-
-上例返回的 Packet 已包含本轮编译结果：
-
-```python
-context = packet.context_package
-```
-
-`ContextPackage` 包含：
+## CLI 与 AI
 
 ```text
-current_event
-character
-current_state
-relationship
-active_threads
-relevant_memories
-recent_dialogue
-response_policy
-output_contract
-budget
-trace
+freeagent ext state --id cc.endview.affectweave --role maya --space local --actor owner --data-dir <Core数据目录>
+freeagent control catalog
+freeagent control list --data-dir <Core数据目录> --json
 ```
 
-查看预算和裁剪结果：
+创建/修改/删除人物和状态使用 Core 的 `extensions.change_state`；设置默认人物和片段字节预算使用 manifest 白名单限制的 `extensions.set_policy`。CLI `control plan` 显示提示，GUI 使用确认卡片，AI 只能提出具体提案。来源 ID 可从管理页最近已采用输入或 `ext state` 返回值取得；昵称和模型文字不能充当身份。
 
-```python
-context.budget.estimated_tokens
-context.budget.maximum_tokens
-context.budget.removed_sections
-context.budget.removal_reasons
-```
-
-### 3. Renderer 转换输出形式
-
-```python
-from affectweave.compiler import (
-    JSONRenderer,
-    MessageBlockRenderer,
-    TextPromptRenderer,
-)
-
-text = TextPromptRenderer().render(context).content
-structured = JSONRenderer().render(context).content
-messages = MessageBlockRenderer().render(context).content
-```
-
-通过 `EnhancementPacket` 可以直接使用便利方法：
-
-```python
-packet.prompt_fragment       # 兼容属性，始终返回文本提示词
-packet.to_prompt()           # 文本提示词
-packet.to_context_json()     # ContextPackage JSON
-packet.to_messages()         # 通用消息块
-packet.output_schema         # 宿主 AI 的结构化输出 Schema
-```
-
-### 4. commit_output()
-
-宿主 AI 返回 JSON 后：
-
-```python
-committed = affectweave.commit_output(
-    "maya",
-    packet,
-    raw_model_json,
-    idempotency_key="turn-1:commit",
-)
-```
-
-AffectWeave 校验结构、拒绝受保护字段、执行状态限幅，并保存候选回复。
-
-### 5. record_delivery()
-
-回复真正显示或发送后：
-
-```python
-delivered = affectweave.record_delivery(
-    "maya",
-    packet.behavior_id,
-    committed.behavior.generated_text,
-    idempotency_key="turn-1:delivery",
-)
-```
-
-### 6. record_outcome()
-
-观察到后续用户反应或明确结果后：
-
-```python
-from affectweave.core import EvidenceLevel, OutcomeEvent, RelationshipDelta
-
-affectweave.record_outcome(
-    "maya",
-    packet.behavior_id,
-    OutcomeEvent(
-        outcome_id="turn-1:user-response",
-        evidence_level=EvidenceLevel.L2,
-        occurred_at=now,
-        summary="用户继续正常交流。",
-        relationship_delta=RelationshipDelta(warmth=0.01),
-    ),
-    idempotency_key="turn-1:outcome",
-    expected_state_version=delivered.state_version,
-)
-```
-
-## 三种上下文形式
-
-### 文本提示词
-
-```python
-prompt = packet.to_prompt(include_schema=True)
-```
-
-适合直接追加到宿主的系统提示词或开发者提示词。
-
-### 结构化 JSON
-
-```python
-context_json = packet.to_context_json()
-```
-
-适合自定义 Agent、工具链、跨语言宿主和调试界面。
-
-### 通用消息块
-
-```python
-messages = packet.to_messages()
-```
-
-默认输出：
-
-```json
-[
-  {
-    "role": "developer",
-    "content": "..."
-  }
-]
-```
-
-宿主可以将它映射到自己支持的指令角色。
-
-## CLI
-
-初始化人物：
-
-```bash
-affectweave --db runtime/affectweave.sqlite3 init --character maya
-```
-
-输出完整 Packet：
-
-```bash
-affectweave --db runtime/affectweave.sqlite3 prepare \
-  --character maya \
-  --actor mighon \
-  --message "Hello, Maya" \
-  --idempotency-key session-1-turn-1 \
-  --format packet
-```
-
-输出文本提示词：
-
-```bash
-affectweave ... prepare ... --format prompt
-```
-
-输出 ContextPackage JSON 与预算报告：
-
-```bash
-affectweave ... prepare ... --format context --show-budget
-```
-
-输出通用消息块：
-
-```bash
-affectweave ... prepare ... --format messages
-```
-
-## 核心状态
-
-| 状态 | 作用 |
-|---|---|
-| Persona | 身份、价值观、人格参数和稳定底色 |
-| Medium State | 愉悦度、激活度、精力和压力 |
-| Emotion Episode | 情绪类型、原因、对象、强度和未解决程度 |
-| Relationship | 熟悉度、信任、温度、可靠度、冲突和姿态 |
-| ActiveThread | 仍在推进的目标、担忧、承诺和等待结果 |
-| Episodic Memory | 带来源和证据等级的互动记忆 |
-| Behavior | 候选回复、实际交付和后续结果 |
-
-行为证据：
-
-| 等级 | 含义 |
-|---|---|
-| L0 | AI 已生成候选回复 |
-| L1 | 回复已实际发送或显示 |
-| L2 | 已观察到后续用户反应或互动结果 |
-| L3 | 结果得到明确确认或独立验证 |
-
-## 模块说明
-
-### `affectweave.core`
-
-负责人物状态、更新规则、行为生命周期和持久化。
-
-### `affectweave.compiler.context`
-
-负责选择、压缩和预算管理，输出 `ContextPackage`。
-
-### `affectweave.compiler.renderers`
-
-负责将 `ContextPackage` 渲染为文本、JSON 或消息块。
-
-### `affectweave.compiler.packet`
-
-定义 `ContextPackage`、`EnhancementPacket`、预算报告、追踪信息和输出 Schema。
-
-### `affectweave.compiler.validator`
-
-负责校验宿主 AI 的结构化输出。
-
-### `affectweave.integration`
-
-提供：
+## 备份与恢复
 
 ```text
-prepare_turn
-commit_output
-record_delivery
-record_outcome
+freeagent ext backup --id cc.endview.affectweave --to <新的配套备份目录> --data-dir <当前数据目录>
+freeagent ext verify-backup --from <配套备份目录>
+freeagent ext restore --from <配套备份目录> --data-dir <新的数据目录> --package <同版本cc.endview.affectweave目录>
 ```
 
-### `affectweave.cli`
+备份只暂停扩展写回，最多约 110 秒，普通 Core 任务继续。它核查原操作结果，保存两份数据库快照、控制日志和持久来源清单；等待超时、来源缺失或原写入未核清时不发布完整备份，暂停最终释放。
 
-向 Shell、编码代理和其他进程提供同一套工作流。
+恢复前先停止旧 Owner 与渠道，避免同一身份运行两份 Bot。目标必须是新目录，扩展包版本必须匹配。恢复不重跑模型或工具；扩展恢复失败时保留已恢复的 Core，并关闭扩展。凭据、工作区文件仍按 Core 指南单独备份。备份含私人状态，按用户数据保管。
 
-## 项目结构
+一次状态提交丢失回执时，使用 `freeagent control reconcile-extension --operation <原操作ID> --data-dir <数据目录>` 核对原结果。核对只读，不再次派发；找不到且不能确定结束时继续保留 UNKNOWN。
+
+## 开发与测试
 
 ```text
-affectweave/
-├── src/affectweave/
-│   ├── core/
-│   ├── compiler/
-│   │   ├── context.py
-│   │   ├── packet.py
-│   │   ├── renderers.py
-│   │   ├── prompt.py
-│   │   └── validator.py
-│   ├── integration.py
-│   ├── cli.py
-│   └── __init__.py
-├── tests/
-├── examples/
-├── docs/
-├── .github/
-├── README.md
-├── LICENSE
-└── pyproject.toml
+go test -race ./internal/affect
+go test -race ./...
+python scripts/package.py --target windows-amd64 --out output/packages --go go
+python scripts/package.py --target linux-amd64 --out output/packages --go go
 ```
 
-## 开发
+PG 集成测试需要独立服务。通过 FreeAgent 的 `scripts/test-postgres.py --runtime <PG15运行时> -- go test -race ./...` 运行；没有服务会明确 skip，不能当作 PG 验收通过。生产打包要求已提交源码；本地验证才使用 `--allow-dirty`。
 
-```bash
-python -m pip install -e .
-python -m unittest discover -s tests -v
-python examples/basic_host.py
-python examples/rendering_formats.py
-```
+[架构与数据](docs/ARCHITECTURE.md) · [宿主接口](docs/FREEAGENT.md) · [规则迁写对照](docs/REFERENCE_MAPPING.md)。原 Python demo 已归档到 `reference/python`，固定提交和数值 fixture 仅供历史对照；不随产品包发行，不保留 SQLite 后端或旧协议兼容层。
 
-贡献流程见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
-
-## 版本与许可
-
-- GitHub Tag：`v0.2-demo`
-- Python Package：`0.2.0.dev0`
-- License：[MIT](LICENSE)
+MIT；发行包保留 Go 及运行依赖的许可证。

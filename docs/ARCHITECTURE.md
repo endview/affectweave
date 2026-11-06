@@ -1,168 +1,17 @@
-# AffectWeave Architecture
+# Go 架构与数据
 
-## 1. Context Pipeline
+`cmd/affectweave` 是唯一生产入口。`internal/affect` 为无 I/O 规则与片段编译，`internal/storage` 使用 PG 事务/CAS/原操作结果，`internal/extension` 仅负责 FreeAgent NDJSON。Core 不导入人物业务。
 
-AffectWeave separates persistent state, context selection and host rendering:
+`aw.roles` 保存可编辑但不隐式学习的人物定义和明确空间列表；`aw.states` 保存每个 Core/空间/人物/参与者的有界当前状态。当前情绪与未决事件各限 128，来源引用保留最近 32 条，当前状态 JSON 上限 256 KiB。超过边界报告错误，不无声删数据。
 
-```text
-Core State
-    ↓
-TurnPreparation
-    ↓
-ContextCompiler
-    ↓
-ContextPackage
-    ├── TextPromptRenderer
-    ├── JSONRenderer
-    └── MessageBlockRenderer
-    ↓
-EnhancementPacket
-    ↓
-Host AI
-```
+输入冻结、事实、经历、操作结果分在 `aw.inputs`、`aw.facts`、`aw.memories`、`aw.operations`，不把整个人物生命周期追加进一个 JSON。输入 ID 为 Core 的“会话ID/消息序号”，不能单用各会话内重复的数字序号。相同输入不同内容拒绝；重复上下文返回采用时快照。逻辑时间不会倒退。
 
-The host-reported behavior lifecycle is:
+状态更新与原 ControlOperation ID/摘要/请求指纹/结果在同一 PG 事务提交。同 ID 同内容返回原结果，不同内容拒绝；CAS 失败、缺来源、授权撤销时不改变状态。原结果记录随备份保存，不自动清理。
 
-```text
-prepare_turn
-→ host AI
-→ commit_output
-→ record_delivery
-→ record_outcome
-```
+固定规则：心境单次变化 0.05；情绪单次升降 0.25，按类型/原因/目标区分；关系变化 0.05，L2 反馈减半；未决事件变化 0.20，置信度 0.85 以上才直接解决；衰减时间常数 3600 秒，未决残留系数 0.30。经历显著性阈值 0.20，排序保留最多 5 条上下文经历。
 
-## 2. Package boundaries
+片段只含人物数据，不重复原聊天和 Core 摘要；先去除低优先级经历、可选风格、情绪和事件，保留身份/边界。不可变部分超过预算时明确失败，不截断 UTF-8 或删除边界。正常回答的模型、流式、工具和总上下文预算由 Core 决定。
 
-### `affectweave.core`
+交付事实保留 sent/partial/unknown/failed；`turn.finished` 只记 L0 生成。用户反馈须引用实际采用的输入及已有交付来源，长期反馈/经历仍需控制确认。模型自评不自动变为 L2/L3。
 
-Owns persistent state and deterministic storage, clamping, decay and lifecycle rules:
-
-- frozen Persona;
-- medium-term state;
-- causal emotion episodes;
-- per-entity relationship state;
-- active threads;
-- evidence-backed episodic memories;
-- behavior records;
-- clamping, versions and idempotency;
-- JSON and SQLite persistence;
-- L0/L1/L2/L3 lifecycle and host-submitted outcome application.
-
-### `affectweave.compiler.context`
-
-Owns context selection and budgeting:
-
-- current event preservation;
-- character projection;
-- active emotion and relationship digest;
-- ActiveThread preservation;
-- memory and recent-dialogue selection;
-- optional-section trimming;
-- `ContextBudgetReport` and `ContextTrace`.
-
-It produces a host-neutral `ContextPackage`.
-
-### `affectweave.compiler.renderers`
-
-Owns output formatting:
-
-- `TextPromptRenderer`;
-- `JSONRenderer`;
-- `MessageBlockRenderer`.
-
-Renderers treat each context package as read-only and do not modify Core state.
-
-### `affectweave.compiler.packet`
-
-Owns the exchange contract:
-
-- `ContextPackage`;
-- `EnhancementPacket`;
-- output JSON Schema;
-- serialization and compatibility loading.
-
-### `affectweave.compiler.validator`
-
-Validates host AI output before Core updates are accepted.
-
-### `affectweave.integration`
-
-Coordinates Core, ContextCompiler, Renderer and Validator through the public lifecycle.
-
-## 3. Dependency direction
-
-```text
-core        -> Python standard library
-context     -> core + packet
-renderers   -> context + packet
-validator   -> core data types
-integration -> core + compiler
-cli         -> integration
-host        -> integration or cli
-```
-
-## 4. Budgeting
-
-The compiler uses a provider-neutral estimate for the canonical context selection.
-It preserves the current event and base ActiveThread fields, then removes optional
-content in this order:
-
-1. voice notes and contradictions;
-2. lowest-priority memories;
-3. oldest recent dialogue above the minimum;
-4. optional preferences and low-priority values/traits;
-5. optional ActiveThread details;
-6. verbose rule and task wording.
-
-The result is recorded in `ContextBudgetReport`:
-
-```text
-maximum_tokens
-estimated_tokens
-overflow
-included_sections
-removed_sections
-removal_reasons
-```
-
-`ContextBudgetReport.estimated_tokens` covers the canonical context plus the
-configured renderer overhead. Each renderer also reports the estimate for its
-actual output:
-
-```python
-rendered = packet.render("messages")
-rendered.estimated_tokens
-```
-
-`packet.estimated_tokens` describes the Packet's default rendering. A host that
-switches format should use the returned `RenderedContext.estimated_tokens`.
-Appending the output schema with `to_prompt(include_schema=True)` adds content
-outside the canonical context budget.
-
-## 5. EnhancementPacket
-
-The packet contains:
-
-```text
-ContextPackage
-Default RenderedContext
-Output JSON Schema
-Turn and behavior identifiers
-```
-
-Convenience methods:
-
-```python
-packet.to_prompt()
-packet.to_context_json()
-packet.to_messages()
-packet.to_json()          # full packet serialization
-```
-
-## 6. Compatibility
-
-`PromptCompiler` and `PromptConfig` remain as compatibility wrappers around
-`ContextCompiler` and `ContextConfig`. `packet.prompt_fragment` remains a text
-accessor, and `EnhancementPacket.from_dict()` / `from_json()` can load legacy
-v0.1 packets. The v0.2 constructor and serialized ContextPackage layout are the
-new canonical contract.
+独立数据库使用 NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOINHERIT 角色，不能连接 Core 库。连接从宿主交付的私有文件取得，不写 stdout、不进上下文。启用本地原生扩展是运行受信任程序；它不是恶意插件隔离沙箱。
