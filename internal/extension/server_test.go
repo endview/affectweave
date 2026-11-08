@@ -104,3 +104,45 @@ func TestRealPGAdapterPreservesGenerationAndDeliveryLevels(t *testing.T) {
 		t.Fatal("delivery implicitly learned", current)
 	}
 }
+
+func TestRealPGFactSyncDoesNotReprepareAnExistingInput(t *testing.T) {
+	store, _ := testpg.Open(t)
+	s := &Server{Store: store}
+	scope := affect.Scope{Core: store.CoreID, Space: "local", Role: "maya", Actor: "owner"}
+	persona := affect.Persona{ID: "maya", Name: "Maya", Identity: "Synthetic engineering partner", Version: 1, Frozen: true}
+	if _, err := store.Apply(t.Context(), "role", "digest", storage.Change{Scope: scope, Action: "create_role", Persona: &persona, Spaces: []string{"local"}}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	input := storage.Input{ID: "chat/1", RunID: "old-run", Text: "Original source", At: at}
+	state, err := store.Adopt(t.Context(), scope, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A fact reread has no authority to regenerate a missing immutable fragment.
+	if _, err = store.DB.ExecContext(t.Context(), `UPDATE aw.inputs SET context_snapshot='{}' WHERE scope=$1 AND input_id=$2`, scope.Key(), input.ID); err != nil {
+		t.Fatal(err)
+	}
+	f := RunFacts{Identity: &Identity{Core: store.CoreID, Space: scope.Space, Conversation: "chat", Run: input.RunID, Inputs: []Adopted{{ID: input.ID, Actor: scope.Actor, Text: input.Text, At: at}}}, Status: "completed", Output: "Original answer", Updated: at}
+	if err = s.syncFacts(t.Context(), scope.Role, f); err != nil {
+		t.Fatal("fact reread tried to reconstruct the input context", err)
+	}
+	current, err := store.Read(t.Context(), scope)
+	if err != nil || current.Revision != state.Revision {
+		t.Fatal("fact reread advanced state", current.Revision, err)
+	}
+	var raw string
+	if err = store.DB.QueryRowContext(t.Context(), `SELECT context_snapshot::text FROM aw.inputs WHERE scope=$1 AND input_id=$2`, scope.Key(), input.ID).Scan(&raw); err != nil || raw != "{}" {
+		t.Fatal("fact reread rewrote frozen fragment", raw, err)
+	}
+	if _, err = store.Adopt(t.Context(), scope, input); err == nil {
+		t.Fatal("ordinary repeated hook accepted an incomplete fragment")
+	}
+	f.Identity.Inputs[0].Text = "Changed historical source"
+	if err = s.syncFacts(t.Context(), scope.Role, f); !errors.Is(err, storage.ErrOperation) {
+		t.Fatal("changed source was accepted", err)
+	}
+	if _, err = store.Adopt(t.Context(), scope, storage.Input{ID: "chat/2", RunID: "new-run", Text: "New input", At: at.Add(time.Second)}); err != nil {
+		t.Fatal("new input could not prepare", err)
+	}
+}

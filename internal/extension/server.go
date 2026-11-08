@@ -397,7 +397,7 @@ func (s *Server) syncFacts(ctx context.Context, role string, f RunFacts) error {
 	}
 	for _, in := range f.Identity.Inputs {
 		scope := affect.Scope{Core: f.Identity.Core, Space: f.Identity.Space, Role: role, Actor: in.Actor}
-		if _, err := s.Store.Adopt(ctx, scope, storage.Input{ID: in.ID, RunID: f.Identity.Run, Text: in.Text, At: in.At, FeedbackSource: in.FeedbackSource}); err != nil {
+		if err := s.Store.EnsureFactSource(ctx, scope, storage.Input{ID: in.ID, RunID: f.Identity.Run, Text: in.Text, At: in.At, FeedbackSource: in.FeedbackSource}); err != nil {
 			return err
 		}
 		body, _ := json.Marshal(map[string]any{"run_id": f.Identity.Run, "status": f.Status, "output": f.Output, "evidence_level": "L0"})

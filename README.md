@@ -1,6 +1,6 @@
 # AffectWeave for FreeAgent
 
-可选的人物、关系与经历连续性扩展。当前为 **1.6.0-dev.1 Go 开发候选**，配套 FreeAgent **v8.7.0-dev.1**。产品运行时只需扩展程序和 Core 管理的受限 PostgreSQL；不需要 Python、Node 或 Go。
+可选的人物、关系与经历连续性扩展。当前为 **1.6.0-dev.2 Go 开发候选**，配套 FreeAgent **v8.7.0-dev.1**。产品运行时只需扩展程序和 Core 管理的受限 PostgreSQL；不需要 Python、Node 或 Go。
 
 ## 本版能力
 

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const Version = "1.6.0-dev.1"
+const Version = "1.6.0-dev.2"
 
 var ErrInvalid = errors.New("affectweave: invalid state or proposal")
 

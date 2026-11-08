@@ -1,6 +1,6 @@
 # FreeAgent 接入契约
 
-配套 FreeAgent v8.7.0-dev.1 / AffectWeave 1.6.0-dev.1。公共协议以 FreeAgent Extension Kit 为准；本文件描述扩展适配。
+配套 FreeAgent v8.7.0-dev.1 / AffectWeave 1.6.0-dev.2。公共协议以 FreeAgent Extension Kit 为准；本文件描述扩展适配。
 
 协议 freeagent-ext/1、state_version=2、受限独立 PG schema aw/storage_version=1。一行一个 JSON-RPC 2.0，stdout 仅协议，1 MiB 帧、最多四个并发请求。读循环持续分发 Host 响应；等待 model.generate 时不会堵住取消。普通请求最多20秒；分析2–30秒+清理余量；wake.evaluate遵守Host的5–120秒绝对截止时间，不能统一延长状态读取。
 
