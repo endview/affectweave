@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/endview/affectweave/internal/affect"
 	"github.com/endview/affectweave/internal/storage"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,29 @@ type Analysis struct {
 	Emotions   []affect.EmotionDelta `json:"emotion_candidates"`
 	Behavior   string                `json:"behavior_hint"`
 	Persistent affect.Proposal       `json:"persistent_candidates"`
+}
+
+func decodeAnalysis(raw []byte, a *Analysis) error {
+	if len(raw) > 32<<10 || strictJSON(raw, a) != nil {
+		return affect.ErrInvalid
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return affect.ErrInvalid
+	}
+	for _, key := range []string{"appraisal", "emotion_candidates", "behavior_hint", "persistent_candidates"} {
+		if len(fields[key]) == 0 || string(fields[key]) == "null" {
+			return affect.ErrInvalid
+		}
+	}
+	if strings.TrimSpace(a.Appraisal.Kind) == "" || len(a.Appraisal.Kind) > 128 || strings.TrimSpace(a.Appraisal.Reason) == "" {
+		return affect.ErrInvalid
+	}
+	var appraisal map[string]json.RawMessage
+	if json.Unmarshal(fields["appraisal"], &appraisal) != nil || len(appraisal["confidence"]) == 0 || string(appraisal["confidence"]) == "null" {
+		return affect.ErrInvalid
+	}
+	return nil
 }
 
 func (s *Server) analyze(ctx context.Context, p Params, scope affect.Scope, f storage.FrozenInput) (storage.FrozenInput, error) {
@@ -39,7 +63,7 @@ func (s *Server) analyze(ctx context.Context, p Params, scope affect.Scope, f st
 	f.Detail = "analysis unavailable or invalid; confirmed-only context used"
 	if err == nil {
 		var a Analysis
-		if strictJSON([]byte(response.Content), &a) == nil && len(a.Behavior) <= 1024 && len(a.Appraisal.Reason) <= 1024 && a.Appraisal.Confidence >= 0 && a.Appraisal.Confidence <= 1 && a.Persistent.Validate() == nil {
+		if decodeAnalysis([]byte(response.Content), &a) == nil && len(a.Behavior) <= 1024 && len(a.Appraisal.Reason) <= 1024 && a.Appraisal.Confidence >= 0 && a.Appraisal.Confidence <= 1 && a.Persistent.Validate() == nil {
 			temporary := affect.Clone(f.State)
 			stimulus := affect.Proposal{Emotions: a.Emotions}
 			if affect.Apply(&temporary, stimulus, f.Input.ID, f.Input.At, 1) == nil {
