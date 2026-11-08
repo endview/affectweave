@@ -45,6 +45,9 @@ def main():
     (extension / binary_name).chmod(0o755)
     shutil.copyfile(repo / 'LICENSE', extension / 'LICENSE')
     shutil.copyfile(repo / 'README.md', root / 'README.md')
+    (root / 'docs').mkdir()
+    for document in ('ARCHITECTURE.md', 'FREEAGENT.md', 'DEVELOPMENT.md', 'REFERENCE_MAPPING.md', 'VALIDATION_1_6_2026-11-08.md'):
+        shutil.copyfile(repo / 'docs' / document, root / 'docs' / document)
     modules = run([args.go, 'list', '-deps', '-f', '{{with .Module}}{{.Path}}\t{{.Version}}\t{{.Dir}}{{end}}', './cmd/affectweave'], cwd=repo)
     notices = []
     for line in sorted(set(modules.splitlines())):

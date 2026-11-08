@@ -37,7 +37,7 @@ func Advance(s *State, now time.Time) {
 		} else {
 			e.Unresolved = 0
 		}
-		e.Intensity = Clamp(residual+(e.Intensity-residual)*math.Exp(-elapsed/3600), 0, 1)
+		e.Intensity = Clamp(residual+(e.Intensity-residual)*math.Exp(-elapsed/s.Persona.EffectiveParameters().Tau()), 0, 1)
 		e.Active = e.Intensity >= .01
 		e.Updated = now
 		s.Emotions[id] = e
@@ -48,6 +48,9 @@ func Advance(s *State, now time.Time) {
 // Apply runs only after a host-confirmed state operation. Limits match the
 // fixed Python reference; no preference is inferred from free user text.
 func Apply(s *State, p Proposal, event string, now time.Time, multiplier float64) error {
+	if slices.Contains(s.AppliedEvents, event) {
+		return nil
+	}
 	next := Clone(*s)
 	if err := applyInPlace(&next, p, event, now, multiplier); err != nil {
 		return err
@@ -73,7 +76,7 @@ func applyInPlace(s *State, p Proposal, event string, now time.Time, multiplier 
 		identity, _ := json.Marshal([]string{d.Type, d.CauseID, d.Target})
 		id := Hash(identity)
 		e, exists := s.Emotions[id]
-		delta := Clamp(d.Delta*multiplier, -.25, .25)
+		delta := Clamp(d.Delta*multiplier*s.Persona.EffectiveParameters().Gain(d.Type), -.25, .25)
 		if !exists {
 			if delta <= 0 {
 				continue
@@ -147,6 +150,19 @@ func applyInPlace(s *State, p Proposal, event string, now time.Time, multiplier 
 		t.Updated = now
 		s.Threads[d.ID] = t
 	}
+	couple(s)
+	for _, thread := range p.Threads {
+		if thread.Confidence >= .85 && thread.Result != "" {
+			if err := Transform(s, thread.ID, event, thread.Result); err != nil {
+				return err
+			}
+		}
+	}
+	s.AppliedEvents = append(s.AppliedEvents, event)
+	if len(s.AppliedEvents) > 256 {
+		s.AppliedEvents = s.AppliedEvents[len(s.AppliedEvents)-256:]
+	}
+	retire(s)
 	if len(s.Emotions) > 128 || len(s.Threads) > 128 {
 		return ErrInvalid
 	}
@@ -175,4 +191,35 @@ func SelectMemories(all []Memory, actor string, now time.Time) []Memory {
 		return result[i].ID < result[j].ID
 	})
 	return result[:min(5, len(result))]
+}
+
+// Retire only inactive records, in stable order. Live causes are never silently
+// discarded to make room for a new event; a full live state rejects atomically.
+func retire(s *State) {
+	ids := make([]string, 0, len(s.Emotions))
+	for id, e := range s.Emotions {
+		if !e.Active && e.Intensity < .01 {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if len(s.Emotions) <= 128 {
+			break
+		}
+		delete(s.Emotions, id)
+	}
+	ids = nil
+	for id, t := range s.Threads {
+		if t.Status != "active" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if len(s.Threads) <= 128 {
+			break
+		}
+		delete(s.Threads, id)
+	}
 }

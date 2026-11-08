@@ -15,7 +15,7 @@ import (
 func TestProtocolHandshakeAndBoundedFrames(t *testing.T) {
 	var output bytes.Buffer
 	s := &Server{}
-	input := "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocol\":\"freeagent-ext/1\"}}\n"
+	input := "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocol\":\"freeagent-ext/1\",\"state_version\":2,\"capabilities\":[\"context_analysis\",\"scheduled_generation\"]}}\n"
 	if err := s.Serve(t.Context(), bytes.NewBufferString(input), &output); err != nil {
 		t.Fatal(err)
 	}
@@ -25,11 +25,14 @@ func TestProtocolHandshakeAndBoundedFrames(t *testing.T) {
 			Provides []string `json:"provides"`
 		} `json:"result"`
 	}
-	if json.Unmarshal(bytes.TrimSpace(output.Bytes()), &reply) != nil || reply.Result.ID != ID || len(reply.Result.Provides) != 2 {
+	if json.Unmarshal(bytes.TrimSpace(output.Bytes()), &reply) != nil || reply.Result.ID != ID || len(reply.Result.Provides) != 3 {
 		t.Fatal(output.String())
 	}
 	if err := s.Serve(t.Context(), bytes.NewBuffer(bytes.Repeat([]byte("x"), 1<<20+1)), &bytes.Buffer{}); err == nil {
 		t.Fatal("oversized frame accepted")
+	}
+	if _, err := s.handle(t.Context(), "initialize", []byte(`{"protocol":"freeagent-ext/1","state_version":2,"capabilities":["context_analysis"]}`)); err == nil {
+		t.Fatal("missing required host capability accepted")
 	}
 }
 func TestPauseCancellationReleasesAndDeadlineIsBounded(t *testing.T) {

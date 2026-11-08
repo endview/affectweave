@@ -16,3 +16,9 @@
 `internal/affect/testdata/python-reference.json` 是从固定参考实际导出的 5 类场景：限幅、共存、残留衰减、能量证据、低置信度解决；数值容差 1e-12，离散决定严格比较。新的来源、授权、确认和 UNKNOWN 行为按新契约验收，不假称与旧 demo 行为完全相同。
 
 整体 Go 迁写消除了生产 Python/SQLite 包装；业务仍独立于 FreeAgent Core，没有新增通用 Go SDK 或插件平台。
+
+以上映射说明规则、持久化与宿主接口的迁写，不代表普通聊天已自动产生状态提案或完成结果回流。2026-11-07 源码核查确认：手动人物编辑与新版本采用已实现；自动分析、人格参数驱动、情绪交互和经审查的人格演进尚待实施。完整冻结、反馈关联及后续交付范围见[后续实施方案](AFFECTWEAVE_NEXT_IMPLEMENTATION_PLAN_2026-11-07.md)。
+
+## 1.6 Go 实施增量
+
+冻结：storage/frozen.go、analysis.go；动态分析：extension/analysis.go；可信反馈：storage/feedback.go、feedback_context.go；参数与交互：affect/parameters.go、interactions.go；演进与版本：storage/evolution.go；主动：affect/proactive.go、extension/proactive.go、storage/wake.go。运行权威仍在Core。自动L3升级未实现，明确拒绝；真人场景验收不能由Python旧功能表替代。

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS aw.states (
 CREATE TABLE IF NOT EXISTS aw.inputs (
  scope text NOT NULL REFERENCES aw.states(scope) ON DELETE CASCADE,
  input_id text NOT NULL, source_hash text NOT NULL, run_id text NOT NULL,
- snapshot jsonb NOT NULL, occurred_at timestamptz NOT NULL,
+ snapshot jsonb NOT NULL, context_snapshot jsonb NOT NULL, occurred_at timestamptz NOT NULL,
  PRIMARY KEY(scope,input_id)
 );
 CREATE TABLE IF NOT EXISTS aw.memories (
@@ -32,3 +32,5 @@ CREATE TABLE IF NOT EXISTS aw.operations (
 CREATE TABLE IF NOT EXISTS aw.progress (
  core_id text PRIMARY KEY, boundary jsonb NOT NULL
 );
+
+ALTER TABLE aw.inputs ADD COLUMN IF NOT EXISTS context_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb;

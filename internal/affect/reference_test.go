@@ -2,6 +2,7 @@ package affect
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -36,8 +37,8 @@ func TestFixedPythonReferenceScenarios(t *testing.T) {
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			s := base()
-			for _, p := range c.Proposals {
-				if err := Apply(&s, p, "event", s.Updated, 1); err != nil {
+			for n, p := range c.Proposals {
+				if err := Apply(&s, p, fmt.Sprint("event-", n), s.Updated, 1); err != nil {
 					t.Fatal(err)
 				}
 			}

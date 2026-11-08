@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const Version = "1.0.0-dev.1"
+const Version = "1.6.0-dev.1"
 
 var ErrInvalid = errors.New("affectweave: invalid state or proposal")
 
@@ -35,6 +35,9 @@ func (s Scope) Key() string { b, _ := json.Marshal(s); return Hash(b) }
 func Hash(b []byte) string  { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 type Persona struct {
+	Parameters     *Parameters        `json:"parameters,omitempty"`
+	Interactions   *Interactions      `json:"interactions,omitempty"`
+	Evolution      *Evolution         `json:"evolution,omitempty"`
 	ID             string             `json:"id"`
 	Name           string             `json:"name"`
 	Identity       string             `json:"identity_summary"`
@@ -92,14 +95,15 @@ type Thread struct {
 	Updated    time.Time `json:"updated_at"`
 }
 type State struct {
-	Scope        Scope              `json:"scope"`
-	Revision     int64              `json:"revision"`
-	Persona      Persona            `json:"persona"`
-	Medium       Medium             `json:"medium"`
-	Relationship Relationship       `json:"relationship"`
-	Emotions     map[string]Emotion `json:"emotions"`
-	Threads      map[string]Thread  `json:"threads"`
-	Updated      time.Time          `json:"updated_at"`
+	Scope         Scope              `json:"scope"`
+	Revision      int64              `json:"revision"`
+	Persona       Persona            `json:"persona"`
+	Medium        Medium             `json:"medium"`
+	Relationship  Relationship       `json:"relationship"`
+	Emotions      map[string]Emotion `json:"emotions"`
+	Threads       map[string]Thread  `json:"threads"`
+	Updated       time.Time          `json:"updated_at"`
+	AppliedEvents []string           `json:"applied_events,omitempty"`
 }
 
 func NewState(scope Scope, p Persona, now time.Time) State {
@@ -123,6 +127,7 @@ type EmotionDelta struct {
 	Unresolved float64 `json:"unresolvedness"`
 }
 type ThreadProposal struct {
+	Result          string   `json:"result,omitempty"`
 	Action          string   `json:"action"`
 	ID              string   `json:"thread_id"`
 	Kind            string   `json:"kind"`
@@ -183,6 +188,33 @@ type Output struct {
 func Clamp(v, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, v)) }
 func oneOf(v, choices string) bool    { return strings.Contains("|"+choices+"|", "|"+v+"|") }
 func (p Persona) Validate() error {
+	if p.Parameters != nil {
+		if err := p.Parameters.Validate(); err != nil {
+			return err
+		}
+	}
+	if e := p.Evolution; e != nil {
+		if e.BaselineVersion < 1 || len(e.Overlay) > 20 || len(e.Evidence) > 16 {
+			return ErrInvalid
+		}
+		if err := e.Baseline.Validate(); err != nil {
+			return err
+		}
+		base := e.Baseline.Values()
+		for key, delta := range e.Overlay {
+			value, ok := base[key]
+			if !ok || math.IsNaN(delta) || math.IsInf(delta, 0) || math.Abs(delta) > .200000001 || value+delta < 0 || value+delta > 1 {
+				return ErrInvalid
+			}
+		}
+		if err := p.EffectiveParameters().Validate(); err != nil {
+			return err
+		}
+	}
+
+	if p.Interactions != nil && (p.Interactions.Strength < 0 || p.Interactions.Strength > 1) {
+		return ErrInvalid
+	}
 	if p.ID == "" || p.Name == "" || p.Identity == "" || !p.Frozen || len(p.Identity) > 8192 || len(p.Boundaries) > 32 || len(p.Values) > 32 || len(p.Traits) > 32 {
 		return ErrInvalid
 	}
@@ -239,6 +271,9 @@ func (p Proposal) Validate() error {
 		}
 	}
 	for _, t := range p.Threads {
+		if t.Result != "" && !oneOf(t.Result, "resolved|failed") {
+			return ErrInvalid
+		}
 		if t.ID == "" || !oneOf(t.Action, "upsert|resolve|abandon") || len(t.Summary) > 4096 || len(t.Entities) > 32 {
 			return ErrInvalid
 		}

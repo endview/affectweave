@@ -1,24 +1,26 @@
-# FreeAgent 接口
+# FreeAgent 接入契约
 
-协议 `freeagent-ext/1`，一行一个 JSON-RPC 2.0，stdout 仅协议，最多 4 个并发请求、1 MiB 帧、20 秒请求期限。`$/cancel` 按 invocation 取消，协议不自动重试写入。
+配套 FreeAgent v8.7.0-dev.1 / AffectWeave 1.6.0-dev.1。公共协议以 FreeAgent Extension Kit 为准；本文件描述扩展适配。
 
-manifest 声明 `state`、`passive_context`、`storage: postgresql` 和 `turn.finished`。被动上下文不允许工具、工作流、额外模型预算、工作区/历史 needs 或操作拦截；Host API 仅可报告活动。普通 Core 不依赖该能力。
+协议 freeagent-ext/1、state_version=2、受限独立 PG schema aw/storage_version=1。一行一个 JSON-RPC 2.0，stdout 仅协议，1 MiB 帧、最多四个并发请求。读循环持续分发 Host 响应；等待 model.generate 时不会堵住取消。普通请求最多20秒；分析2–30秒+清理余量；wake.evaluate遵守Host的5–120秒绝对截止时间，不能统一延长状态读取。
 
-| 方法 | 行为 |
+initialize 必须协商 context_analysis 和 scheduled_generation；缺能力拒绝启用。扩展通过 FREEAGENT_EXTENSION_PG_FILE 取得私有连接，不能读取 Core PG、Provider Key 或其他空间。
+
+| 回调 | 行为 |
 | --- | --- |
-| initialize / shutdown | 身份/版本注册与退出 |
-| context.prepare | 采用 Core 验证的 identity/adopted_inputs、角色 variant 和冻结设置，返回有界片段 |
-| turn.finished | 记录 L0 生成，不声称发送/显示/已读 |
-| state.read | 授权空间的人物、当前状态、最近输入引用、经历和事实 |
-| state.preview | 以 expected_revision 预览具体 before/after，不写状态 |
-| state.apply | 原 operation_id/digest/change；事务内更新和去重 |
-| state.result | 只读原结果，未找到不等于证明未执行 |
-| state.sources | 只读分页来源，配套快照核对 |
-| state.pause / pause_status / resume | 唯一令牌和绝对期限的有限暂停，取消/到期释放 |
-| facts.sync | 补登记 Core 原记录，不派发模型/工具；上下文自动补读有界近期同角色记录 |
+| context.prepare | 可信 adopted_inputs；全片段冻结；显式分析开关开启时一次无工具 model.generate |
+| turn.finished | L0生成事实、无损reply_parts、已授权delivery.reply、固定delivery.propose或有界wake_hint |
+| delivery.check | 只读当前事项，撤销已解决的固定跟进；无模型请求 |
+| wake.evaluate | scheduled触发、adopted_inputs为空；授权话题，一次说/不说及最终文本；不发消息、不改人格 |
+| state.read | 人物、状态、近期输入/分析/经历/事实、有效参数、证据与版本 |
+| state.preview/apply/result | 具体修改CAS、原操作幂等/核对，长期变化必须确认 |
+| facts.sync / state.sources | 补原事实和配套来源核查，绝不补执行 |
+| state.pause/pause_status/resume | 备份的有界暂停；取消和到期释放 |
 
-动作包括 create_role、edit_role、delete_role、apply_proposal、record_outcome、reset_state、delete_state、delete_memory。GUI/CLI/AI 经 Core 同一控制面确认。人物的空间必须明确授权。删除当前状态不承诺清除保留的审计记录。
+状态操作包括 create_role/edit_role/delete_role、apply_proposal、record_outcome、reset_state/delete_state/delete_memory、set_evolution/adapt_persona/freeze_persona/rollback_persona。Model payload 不能提供PG身份、来源权限或虚构结果证据；Core以scope.resource/payload绑定原控制。
 
-Core 只交付 `FREEAGENT_EXTENSION_PG_FILE`，其中是独立库连接。未初始化就报告存储错误，不建立临时 SQLite 或内存假持久化。包不附真实连接、Key、人物或对话。
+普通设置语义和默认值由 extension.json 声明：role_id、context_bytes、reply_mode、max_text_parts、analysis_enabled/deadline、expression_enabled、fixed_followup_enabled。主动总开关**不在此设置中复制**，由delivery.generation_enabled唯一授权。仅安装不激活任何自动功能。持久变更走现有控制确认，GUI卡片/CLI提示/AI提案一致。
 
-普通设置白名单在 manifest.model_settings：role_id、context_bytes。环境映射仍 user-only，不开放任意 settings/env_from。本轮选人用 Core `CapabilitySelection.extension_variants`，快照冻结，后续修改只影响新轮。
+context_analysis：每输入一次、每Run两次；每次≤4096估算输入tokens/1024输出tokens，默认8秒。辅助失败降级，不影响普通回答。wake.evaluate：每机会一次，默认30秒；原机会、模型、结果、发送分别记录。reply-to反馈来源来自Core同Bot/目标/会话的真实sent片段，扩展只消费一次。L2不是业务成功证明。
+
+Core负责授权/预算/取消/执行/有序投递；渠道负责平台格式/HTTP/typing/资源；扩展负责人物和表达动机。不新增通用插件UI运行时、独立调度数据库或兼容旧宿主分支。

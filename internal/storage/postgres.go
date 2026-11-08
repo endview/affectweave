@@ -103,10 +103,11 @@ func (s *Store) initialize(ctx context.Context) error {
 func encode(v any) []byte { b, _ := json.Marshal(v); return b }
 
 type Role struct {
-	ID       string         `json:"id"`
-	Revision int64          `json:"revision"`
-	Persona  affect.Persona `json:"persona"`
-	Spaces   []string       `json:"spaces"`
+	Effective *affect.Parameters `json:"effective_parameters,omitempty"`
+	ID        string             `json:"id"`
+	Revision  int64              `json:"revision"`
+	Persona   affect.Persona     `json:"persona"`
+	Spaces    []string           `json:"spaces"`
 }
 
 func (s *Store) Roles(ctx context.Context, space string) ([]Role, error) {
@@ -126,6 +127,8 @@ func (s *Store) Roles(ctx context.Context, space string) ([]Role, error) {
 			return nil, affect.ErrInvalid
 		}
 		if space == "" || slices.Contains(r.Spaces, space) {
+			effective := r.Persona.EffectiveParameters()
+			r.Effective = &effective
 			result = append(result, r)
 		}
 	}
@@ -145,70 +148,96 @@ func (s *Store) Read(ctx context.Context, scope affect.Scope) (affect.State, err
 }
 
 type Input struct {
-	ID    string    `json:"id"`
-	RunID string    `json:"run_id"`
-	Text  string    `json:"text"`
-	At    time.Time `json:"occurred_at"`
+	ID             string    `json:"id"`
+	RunID          string    `json:"run_id"`
+	Text           string    `json:"text"`
+	At             time.Time `json:"occurred_at"`
+	FeedbackSource string    `json:"feedback_source,omitempty"`
 }
 
 // Adopt freezes the state for a host-authenticated adopted input. Repeating
 // context.prepare reads this exact snapshot, even after later confirmations.
 func (s *Store) Adopt(ctx context.Context, scope affect.Scope, in Input) (affect.State, error) {
+	frozen, err := s.AdoptFrozen(ctx, scope, in, InputOptions{})
+	return frozen.State, err
+}
+func (s *Store) AdoptFrozen(ctx context.Context, scope affect.Scope, in Input, options InputOptions) (FrozenInput, error) {
+	options = options.defaults()
 	if !scope.Valid() || scope.Core != s.CoreID || in.ID == "" || in.RunID == "" || in.At.IsZero() || len(in.Text) > 65536 {
-		return affect.State{}, affect.ErrInvalid
+		return FrozenInput{}, affect.ErrInvalid
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return affect.State{}, err
+		return FrozenInput{}, err
 	}
 	defer tx.Rollback()
 	var p, b []byte
 	var revision int64
 	if err = tx.QueryRowContext(ctx, `SELECT revision,persona,spaces FROM aw.roles WHERE id=$1 FOR SHARE`, scope.Role).Scan(&revision, &p, &b); err != nil {
-		return affect.State{}, err
+		return FrozenInput{}, err
 	}
 	var spaces []string
 	var persona affect.Persona
 	if json.Unmarshal(b, &spaces) != nil || json.Unmarshal(p, &persona) != nil || !slices.Contains(spaces, scope.Space) {
-		return affect.State{}, ErrScope
+		return FrozenInput{}, ErrScope
 	}
 	state := affect.NewState(scope, persona, in.At)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO aw.states(scope,core_id,space_id,role_id,actor_id,revision,state) VALUES($1,$2,$3,$4,$5,1,$6) ON CONFLICT DO NOTHING`, scope.Key(), scope.Core, scope.Space, scope.Role, scope.Actor, string(encode(state))); err != nil {
-		return affect.State{}, err
+		return FrozenInput{}, err
 	}
 	if err = tx.QueryRowContext(ctx, `SELECT state FROM aw.states WHERE scope=$1 FOR UPDATE`, scope.Key()).Scan(&b); err != nil {
-		return affect.State{}, err
+		return FrozenInput{}, err
 	}
 	if err = json.Unmarshal(b, &state); err != nil {
-		return affect.State{}, err
+		return FrozenInput{}, err
 	}
 	var oldHash string
-	var frozen []byte
+	var frozen, contextRaw []byte
 	fingerprint := affect.Hash(encode(in))
-	err = tx.QueryRowContext(ctx, `SELECT source_hash,snapshot FROM aw.inputs WHERE scope=$1 AND input_id=$2`, scope.Key(), in.ID).Scan(&oldHash, &frozen)
+	err = tx.QueryRowContext(ctx, `SELECT source_hash,snapshot,context_snapshot FROM aw.inputs WHERE scope=$1 AND input_id=$2`, scope.Key(), in.ID).Scan(&oldHash, &frozen, &contextRaw)
 	if err == nil {
 		if oldHash != fingerprint {
-			return affect.State{}, ErrOperation
+			return FrozenInput{}, ErrOperation
 		}
 		if err = json.Unmarshal(frozen, &state); err != nil {
-			return affect.State{}, err
+			return FrozenInput{}, err
 		}
-		return state, tx.Commit()
+		var result FrozenInput
+		if err = json.Unmarshal(contextRaw, &result); err != nil {
+			return FrozenInput{}, err
+		}
+		if result.Context.Text == "" {
+			return FrozenInput{}, errors.New("affectweave: complete input snapshot unavailable; use a new input")
+		}
+		result.State = state
+		return result, tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return affect.State{}, err
+		return FrozenInput{}, err
 	}
 	// A role edit takes effect on the next adopted input, not a repeated hook.
 	state.Persona = persona
 	affect.Advance(&state, in.At)
 	state.Revision++
 	if _, err = tx.ExecContext(ctx, `UPDATE aw.states SET revision=$1,state=$2 WHERE scope=$3`, state.Revision, string(encode(state)), scope.Key()); err != nil {
-		return affect.State{}, err
+		return FrozenInput{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO aw.inputs(scope,input_id,source_hash,run_id,snapshot,occurred_at) VALUES($1,$2,$3,$4,$5,$6)`, scope.Key(), in.ID, fingerprint, in.RunID, string(encode(state)), in.At); err != nil {
-		return affect.State{}, err
+	memories, err := readMemories(ctx, tx, scope)
+	if err != nil {
+		return FrozenInput{}, err
 	}
-	return state, tx.Commit()
+	packet, err := affect.Compile(state, memories, []string{in.ID}, options.MaxBytes)
+	if err != nil {
+		return FrozenInput{}, err
+	}
+	result := FrozenInput{Input: in, State: state, Memories: affect.SelectMemories(memories, scope.Actor, in.At), Context: packet, Options: options, Analysis: "disabled"}
+	if options.Analysis {
+		result.Analysis = "pending"
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO aw.inputs(scope,input_id,source_hash,run_id,snapshot,context_snapshot,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, scope.Key(), in.ID, fingerprint, in.RunID, string(encode(state)), string(encode(result)), in.At); err != nil {
+		return FrozenInput{}, err
+	}
+	return result, tx.Commit()
 }
 func (s *Store) Memories(ctx context.Context, scope affect.Scope) ([]affect.Memory, error) {
 	if !scope.Valid() || scope.Core != s.CoreID {
@@ -236,16 +265,19 @@ func (s *Store) Memories(ctx context.Context, scope affect.Scope) ([]affect.Memo
 func (s *Store) Close() error { return s.DB.Close() }
 
 type Change struct {
-	Scope    affect.Scope     `json:"scope"`
-	Action   string           `json:"action"`
-	Expected int64            `json:"expected_revision"`
-	Persona  *affect.Persona  `json:"persona,omitempty"`
-	Spaces   []string         `json:"spaces,omitempty"`
-	Source   string           `json:"source_id,omitempty"`
-	Proposal *affect.Proposal `json:"proposal,omitempty"`
-	Decision *affect.Decision `json:"decision,omitempty"`
-	Outcome  *Outcome         `json:"outcome,omitempty"`
-	MemoryID string           `json:"memory_id,omitempty"`
+	Adaptation *affect.Adaptation `json:"adaptation,omitempty"`
+	Flag       *bool              `json:"flag,omitempty"`
+	ToVersion  int64              `json:"to_version,omitempty"`
+	Scope      affect.Scope       `json:"scope"`
+	Action     string             `json:"action"`
+	Expected   int64              `json:"expected_revision"`
+	Persona    *affect.Persona    `json:"persona,omitempty"`
+	Spaces     []string           `json:"spaces,omitempty"`
+	Source     string             `json:"source_id,omitempty"`
+	Proposal   *affect.Proposal   `json:"proposal,omitempty"`
+	Decision   *affect.Decision   `json:"decision,omitempty"`
+	Outcome    *Outcome           `json:"outcome,omitempty"`
+	MemoryID   string             `json:"memory_id,omitempty"`
 }
 type Outcome struct {
 	FeedbackID     string          `json:"feedback_input_id"`
@@ -262,11 +294,12 @@ type Preview struct {
 	Summary  string `json:"summary"`
 }
 type Result struct {
-	Found    bool   `json:"found"`
-	ID       string `json:"operation_id"`
-	Digest   string `json:"digest"`
-	Revision int64  `json:"revision"`
-	Action   string `json:"action"`
+	Persona  *affect.Persona `json:"persona,omitempty"`
+	Found    bool            `json:"found"`
+	ID       string          `json:"operation_id"`
+	Digest   string          `json:"digest"`
+	Revision int64           `json:"revision"`
+	Action   string          `json:"action"`
 }
 
 func validateChange(c Change, core string) error {
@@ -295,7 +328,7 @@ func validateChange(c Change, core string) error {
 		}
 	}
 	switch c.Action {
-	case "create_role", "edit_role", "delete_role", "reset_state", "delete_state", "delete_memory", "apply_proposal", "record_outcome":
+	case "create_role", "edit_role", "delete_role", "reset_state", "delete_state", "delete_memory", "apply_proposal", "record_outcome", "adapt_persona", "set_evolution", "freeze_persona", "rollback_persona":
 	default:
 		return affect.ErrInvalid
 	}
@@ -326,7 +359,7 @@ func (s *Store) Preview(ctx context.Context, c Change) (Preview, error) {
 	if err := validateChange(c, s.CoreID); err != nil {
 		return Preview{}, err
 	}
-	if strings.HasSuffix(c.Action, "role") {
+	if roleAction(c.Action) {
 		var r Role
 		var p, b []byte
 		err := s.DB.QueryRowContext(ctx, `SELECT id,revision,persona,spaces FROM aw.roles WHERE id=$1`, c.Scope.Role).Scan(&r.ID, &r.Revision, &p, &b)
@@ -342,7 +375,15 @@ func (s *Store) Preview(ctx context.Context, c Change) (Preview, error) {
 		}
 		var after any
 		if c.Action != "delete_role" {
-			after = Role{ID: c.Scope.Role, Revision: r.Revision + 1, Persona: *c.Persona, Spaces: c.Spaces}
+			persona, err := buildRolePersona(ctx, s.DB, r.Persona, c)
+			if err != nil {
+				return Preview{}, err
+			}
+			spaces := r.Spaces
+			if c.Action == "create_role" || c.Action == "edit_role" {
+				spaces = c.Spaces
+			}
+			after = Role{ID: c.Scope.Role, Revision: r.Revision + 1, Persona: persona, Spaces: spaces}
 		}
 		return Preview{Revision: r.Revision, Before: r, After: after, Summary: c.Action + " " + c.Scope.Role}, nil
 	}
@@ -360,7 +401,16 @@ func (s *Store) Preview(ctx context.Context, c Change) (Preview, error) {
 		}
 		return Preview{Revision: state.Revision, Before: json.RawMessage(body), After: nil, Summary: "delete confirmed memory " + c.MemoryID}, nil
 	}
-	next, err := nextState(state, c)
+	if c.Action == "record_outcome" {
+		if err = validateFeedback(ctx, s.DB, c); err != nil {
+			return Preview{}, err
+		}
+	}
+	prepared, err := prepareProposal(ctx, s.DB, state, c)
+	if err != nil {
+		return Preview{}, err
+	}
+	next, err := nextState(state, prepared)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -394,7 +444,7 @@ func nextState(state affect.State, c Change) (affect.State, error) {
 		p := c.Outcome.Proposal
 		p.Medium = affect.MediumDelta{}
 		p.Threads = nil
-		if err := affect.Apply(&next, p, c.Source, state.Updated, m); err != nil {
+		if err := affect.Apply(&next, p, c.Source+"#"+c.Outcome.FeedbackID, state.Updated, m); err != nil {
 			return next, err
 		}
 		for _, id := range c.Outcome.Resolve {
@@ -474,12 +524,13 @@ func (s *Store) Apply(ctx context.Context, id, digest string, c Change) (Result,
 		return Result{}, err
 	}
 	result := Result{Found: true, ID: id, Digest: digest, Revision: c.Expected + 1, Action: c.Action}
-	if strings.HasSuffix(c.Action, "role") {
+	if roleAction(c.Action) {
 		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,1))`, c.Scope.Role); err != nil {
 			return result, err
 		}
 		var revision int64
-		err = tx.QueryRowContext(ctx, `SELECT revision FROM aw.roles WHERE id=$1 FOR UPDATE`, c.Scope.Role).Scan(&revision)
+		var personaRaw []byte
+		err = tx.QueryRowContext(ctx, `SELECT revision,persona FROM aw.roles WHERE id=$1 FOR UPDATE`, c.Scope.Role).Scan(&revision, &personaRaw)
 		if errors.Is(err, sql.ErrNoRows) && c.Action == "create_role" {
 			err = nil
 		}
@@ -488,6 +539,15 @@ func (s *Store) Apply(ctx context.Context, id, digest string, c Change) (Result,
 		}
 		if revision != c.Expected {
 			return result, ErrConflict
+		}
+		var prior affect.Persona
+		_ = json.Unmarshal(personaRaw, &prior)
+		if c.Action != "delete_role" {
+			next, err := buildRolePersona(ctx, tx, prior, c)
+			if err != nil {
+				return result, err
+			}
+			result.Persona = &next
 		}
 		switch c.Action {
 		case "create_role":
@@ -504,9 +564,12 @@ func (s *Store) Apply(ctx context.Context, id, digest string, c Change) (Result,
 			if count >= 128 {
 				return result, errors.New("affectweave: role limit reached")
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO aw.roles(id,revision,persona,spaces,updated_at) VALUES($1,1,$2,$3,now())`, c.Scope.Role, string(encode(c.Persona)), string(encode(c.Spaces)))
+			_, err = tx.ExecContext(ctx, `INSERT INTO aw.roles(id,revision,persona,spaces,updated_at) VALUES($1,1,$2,$3,now())`, c.Scope.Role, string(encode(result.Persona)), string(encode(c.Spaces)))
 		case "edit_role":
-			_, err = tx.ExecContext(ctx, `UPDATE aw.roles SET revision=revision+1,persona=$1,spaces=$2,updated_at=now() WHERE id=$3`, string(encode(c.Persona)), string(encode(c.Spaces)), c.Scope.Role)
+			_, err = tx.ExecContext(ctx, `UPDATE aw.roles SET revision=revision+1,persona=$1,spaces=$2,updated_at=now() WHERE id=$3`, string(encode(result.Persona)), string(encode(c.Spaces)), c.Scope.Role)
+		case "adapt_persona", "set_evolution", "freeze_persona", "rollback_persona":
+			_, err = tx.ExecContext(ctx, `UPDATE aw.roles SET revision=revision+1,persona=$1,updated_at=now() WHERE id=$2`, string(encode(result.Persona)), c.Scope.Role)
+
 		case "delete_role":
 			if _, err = tx.ExecContext(ctx, `DELETE FROM aw.states WHERE role_id=$1`, c.Scope.Role); err == nil {
 				_, err = tx.ExecContext(ctx, `DELETE FROM aw.roles WHERE id=$1`, c.Scope.Role)
@@ -539,23 +602,35 @@ func (s *Store) Apply(ctx context.Context, id, digest string, c Change) (Result,
 			}
 		}
 		if c.Action == "record_outcome" {
-			var kind string
-			var body []byte
-			if err = tx.QueryRowContext(ctx, `SELECT kind,body FROM aw.facts WHERE scope=$1 AND id=$2`, c.Scope.Key(), c.Source).Scan(&kind, &body); err != nil {
-				return result, errors.New("affectweave: delivered source required")
+			if err = validateFeedback(ctx, tx, c); err != nil {
+				return result, err
 			}
-			var receipt struct {
-				State string `json:"state"`
+			key := "feedback:" + affect.Hash(encode([]string{c.Source, c.Outcome.FeedbackID}))
+			r, e := tx.ExecContext(ctx, `INSERT INTO aw.facts(scope,id,kind,body,occurred_at) VALUES($1,$2,'feedback',$3,$4) ON CONFLICT DO NOTHING`, c.Scope.Key(), key, string(encode(c.Outcome)), state.Updated)
+			if e != nil {
+				return result, e
 			}
-			if json.Unmarshal(body, &receipt) != nil || kind != "delivery" || receipt.State != "sent" && receipt.State != "partial" {
-				return result, errors.New("affectweave: unknown/failed generation is not delivered evidence")
-			}
-			var feedback bool
-			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM aw.inputs WHERE scope=$1 AND input_id=$2)`, c.Scope.Key(), c.Outcome.FeedbackID).Scan(&feedback); err != nil || !feedback {
-				return result, errors.New("affectweave: actual adopted feedback input required")
+			n, _ := r.RowsAffected()
+			if n != 1 {
+				return result, errors.New("affectweave: feedback already consumed")
 			}
 		}
-		next, buildErr := nextState(state, c)
+
+		prepared, err := prepareProposal(ctx, tx, state, c)
+		if err != nil {
+			return result, err
+		}
+		if c.Action == "apply_proposal" {
+			r, e := tx.ExecContext(ctx, `INSERT INTO aw.facts(scope,id,kind,body,occurred_at) VALUES($1,$2,'applied_proposal',$3,$4) ON CONFLICT DO NOTHING`, c.Scope.Key(), "applied:"+affect.Hash([]byte(c.Source)), string(encode(c.Proposal)), state.Updated)
+			if e != nil {
+				return result, e
+			}
+			n, _ := r.RowsAffected()
+			if n != 1 {
+				return result, ErrOperation
+			}
+		}
+		next, buildErr := nextState(state, prepared)
 		if buildErr != nil {
 			return result, buildErr
 		}
@@ -570,6 +645,22 @@ func (s *Store) Apply(ctx context.Context, id, digest string, c Change) (Result,
 		if c.Action == "reset_state" {
 			if _, err = tx.ExecContext(ctx, `DELETE FROM aw.memories WHERE scope=$1`, c.Scope.Key()); err != nil {
 				return result, err
+			}
+		}
+		if c.Action == "apply_proposal" {
+			for n, m := range c.Proposal.Memories {
+				if m.Salience < .2 {
+					continue
+				}
+				m.ID = affect.Hash([]byte(fmt.Sprintf("%s:%d", id, n)))
+				m.Salience = affect.Clamp(m.Salience, 0, 1)
+				m.Confidence = affect.Clamp(m.Confidence, 0, 1)
+				m.Sources = []string{c.Source}
+				m.Evidence = "reviewed_interpretation"
+				m.Created = state.Updated
+				if _, err = tx.ExecContext(ctx, `INSERT INTO aw.memories(scope,id,body,created_at) VALUES($1,$2,$3,$4)`, c.Scope.Key(), m.ID, string(encode(m)), m.Created); err != nil {
+					return result, err
+				}
 			}
 		}
 		if c.Action == "record_outcome" && c.Outcome.AcceptMemories {
@@ -621,7 +712,7 @@ func (s *Store) RecordFact(ctx context.Context, scope affect.Scope, f Fact) erro
 		return affect.ErrInvalid
 	}
 	switch f.Kind {
-	case "generated", "delivery", "outcome":
+	case "generated", "delivery", "outcome", "proactive", "expression":
 	default:
 		return affect.ErrInvalid
 	}

@@ -109,7 +109,7 @@ func TestRealPGSourceValidationFactsAndConfirmedMemory(t *testing.T) {
 		t.Fatal("failed proposal mutated state")
 	}
 	for _, status := range []string{"sent", "partial", "unknown", "failed"} {
-		body, _ := json.Marshal(map[string]string{"state": status})
+		body, _ := json.Marshal(map[string]string{"state": status, "run_id": in.RunID})
 		fact := storage.Fact{ID: "delivery:" + status, Kind: "delivery", Body: body, At: in.At}
 		if err := s.RecordFact(t.Context(), scope, fact); err != nil {
 			t.Fatal(err)
@@ -122,7 +122,12 @@ func TestRealPGSourceValidationFactsAndConfirmedMemory(t *testing.T) {
 	if err != nil || len(facts) != 4 {
 		t.Fatal(facts, err)
 	}
-	c = storage.Change{Scope: scope, Action: "record_outcome", Expected: state.Revision, Source: "delivery:sent", Outcome: &storage.Outcome{FeedbackID: in.ID, Evidence: "L2", Summary: "user feedback", AcceptMemories: true, Proposal: affect.Proposal{Relationship: affect.Relationship{Trust: 1}, Memories: []affect.Memory{{Summary: "Keep the confirmed boundary", Salience: .8, Confidence: .9}}}}}
+	feedback := storage.Input{ID: "input-2", RunID: "run-2", Text: "the delivered result helped", At: in.At.Add(time.Minute), FeedbackSource: "delivery:sent"}
+	if _, err = s.Adopt(t.Context(), scope, feedback); err != nil {
+		t.Fatal(err)
+	}
+	state, _ = s.Read(t.Context(), scope)
+	c = storage.Change{Scope: scope, Action: "record_outcome", Expected: state.Revision, Source: "delivery:sent", Outcome: &storage.Outcome{FeedbackID: feedback.ID, Evidence: "L2", Summary: "user feedback", AcceptMemories: true, Proposal: affect.Proposal{Relationship: affect.Relationship{Trust: 1}, Memories: []affect.Memory{{Summary: "Keep the confirmed boundary", Salience: .8, Confidence: .9}}}}}
 	if _, err = s.Apply(t.Context(), "feedback", "digest", c); err != nil {
 		t.Fatal(err)
 	}
