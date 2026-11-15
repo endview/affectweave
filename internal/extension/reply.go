@@ -2,12 +2,39 @@ package extension
 
 import "github.com/endview/affectweave/internal/affect"
 
+func replyLimit(p Params) int {
+	limit := p.Settings.ReplyParts
+	if limit == 0 {
+		limit = 3
+	}
+	if p.Delivery != nil {
+		limit = min(limit, p.Delivery.MaxTextParts)
+	}
+	return limit
+}
+
+func replyContext(p Params, text string, state *affect.State) string {
+	if p.Delivery == nil || !p.Delivery.Reply {
+		return text
+	}
+	hint := affect.ReplyGuidance(affect.EffectiveReplyMode(p.Settings.ReplyMode, state), replyLimit(p))
+	maxBytes := p.Settings.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = 6000
+	}
+	if hint != "" && len(hint) <= 512 && len(text)+len(hint)+1 <= maxBytes {
+		if text != "" {
+			text += "\n"
+		}
+		text += hint
+	}
+	return text
+}
+
 // No scheduling, target selection or side effects take place here. The Host
 // still validates output identity, authorization and every delivery receipt.
 func finishedResponse(p Params, summary string) (map[string]any, error) {
-	if p.Settings.ReplyMode == "character" {
-		p.Settings.ReplyMode = "single"
-	}
+	p.Settings.ReplyMode = affect.EffectiveReplyMode(p.Settings.ReplyMode, nil)
 	result := map[string]any{"activity": map[string]any{"summary": summary}}
 	if p.Status != "completed" || p.Delivery == nil || !p.Delivery.Reply || p.Delivery.MaxTextParts < 1 {
 		return result, nil

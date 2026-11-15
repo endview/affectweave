@@ -27,3 +27,27 @@ func TestFinishedResponseOnlyOffersPartsForCompletedAuthorizedReply(t *testing.T
 		t.Fatal("local-only turn emitted channel parts", result, err)
 	}
 }
+
+func TestReplyContextRespectsModeBudgetAndChannel(t *testing.T) {
+	var p Params
+	if err := json.Unmarshal([]byte(`{"settings":{"reply_mode":"paragraphs"},"delivery":{"reply":true,"max_text_parts":3}}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	if replyContext(p, "", nil) == "" {
+		t.Fatal("missing explicit expression without persona")
+	}
+	p.Settings.ReplyMode = "single"
+	if replyContext(p, "original", nil) != "original" {
+		t.Fatal("single changed")
+	}
+	p.Settings.ReplyMode = "paragraphs"
+	p.Settings.MaxBytes = 1024
+	text := string(make([]byte, 900))
+	if replyContext(p, text, nil) != text {
+		t.Fatal("exceeded context allowance")
+	}
+	p.Delivery = nil
+	if replyContext(p, "original", nil) != "original" {
+		t.Fatal("no-channel hint")
+	}
+}

@@ -26,6 +26,8 @@ python scripts/package.py --target linux-amd64 --out OTHER_OUTPUT --go go
 
 ## 增加表达/主动策略
 
+自然分段的纯算法在 `internal/affect/reply.go`；冻结输入的提示适配在 `internal/extension/reply.go`，完成回调仍只返回无损 `reply_parts`。改动同时验证提示与完成模式一致、空行归属、长结构、CRLF、Unicode、均衡合并与 Host 上限。不得把表达算法或人物阈值移入 FreeAgent。
+
 表达只返回原文无损reply_parts或已授权资源选择。固定候选必须先冻结正文，用delivery.check做纯复核。动态主动开场只能在wake.evaluate：校验明确scheduled身份、空adopted_inputs、允许来源、deadline；最多一次model.generate。禁止自建计时器、Bot HTTP客户端或Key管理。长期人物变化仍是待审阅提案，不借主动开关自动写回。
 
 模型和历史均是不可信材料，严格解析封闭结果并限长；无效结果降级/skip，不用另一个模型修JSON。原Claim/Run/Attempt代表一次真实派发，换随机key不是恢复策略。资料里的人格是AI风格角色，不推断真人心理诊断或私人事实。

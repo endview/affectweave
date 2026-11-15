@@ -293,6 +293,9 @@ func (s *Server) handle(ctx context.Context, method string, raw json.RawMessage)
 		}
 		if role == "" {
 			if method == "context.prepare" {
+				if text := replyContext(p, "", nil); text != "" {
+					return map[string]any{"blocks": []any{map[string]any{"id": "reply-expression", "text": text, "placement": "tail", "label": "Reply expression", "priority": 40}}}, nil
+				}
 				return map[string]any{"blocks": []any{}}, nil
 			}
 			if method == "turn.finished" {
@@ -330,6 +333,7 @@ func (s *Server) handle(ctx context.Context, method string, raw json.RawMessage)
 				}
 			}
 			packet := frozen.Context
+			packet.Text = replyContext(p, packet.Text, &frozen.State)
 			return map[string]any{"blocks": []any{map[string]any{"id": "character", "text": packet.Text, "placement": "tail", "label": state.Persona.Name, "priority": 40}}}, nil
 		}
 		if method == "turn.finished" {

@@ -18,6 +18,15 @@ func TestReplyPartsPreserveCodeMathAndSource(t *testing.T) {
 		{"bracket-math", "a\n\n\\[\nx\n\ny\n\\]\n\nz", 3},
 		{"crlf", "第一段\r\n\r\n第二段\r\n\r\n第三段", 3},
 		{"unicode", "你好🙂\n\n**还好**。", 2},
+		{"single-newlines-stay", "第一句。\n第二句。", 1},
+		{"loose-list", "- 第一项\n\n- 第二项\n\n  继续解释\n\n结束。", 2},
+		{"quote", "> 第一行\n\n> 第二行\n\n结束。", 2},
+		{"heading", "## 标题\n\n正文。\n\n结束。", 2},
+		{"reference-link", "[资料][a]\n\n结束\n\n[a]: https://example.com", 1},
+		{"indented-code", "    code\n\n    more\n\n结束。", 2},
+		{"table", "| 项目 | 值 |\n| --- | --- |\n| 一 | 二 |\n\n结束。", 2},
+		{"cross-paragraph-emphasis", "**第一段\n\n第二段**\n\n结束。", 2},
+		{"html-block", "<details>\n\n正文\n\n</details>", 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			parts, err := ReplyParts(test.text, "paragraphs", 3)
@@ -31,6 +40,37 @@ func TestReplyPartsPreserveCodeMathAndSource(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCharacterReplyModeUsesFrozenParameters(t *testing.T) {
+	p := NeutralParameters()
+	state := State{Persona: Persona{Parameters: &p}}
+	if got := EffectiveReplyMode("character", &state); got != "paragraphs" {
+		t.Fatal(got)
+	}
+	p.Expression = .39
+	if got := EffectiveReplyMode("character", &state); got != "single" {
+		t.Fatal(got)
+	}
+	p.Expression = .5
+	p.Directness = 1
+	if got := EffectiveReplyMode("character", &state); got != "single" {
+		t.Fatal(got)
+	}
+	if EffectiveReplyMode("character", nil) != "single" || ReplyGuidance("single", 3) != "" || ReplyGuidance("paragraphs", 1) != "" {
+		t.Fatal("mode/host bounds ignored")
+	}
+}
+
+func TestReplyPartsBalanceWholeParagraphs(t *testing.T) {
+	text := "一。\n\n二。\n\n三。\n\n四。\n\n五。\n\n六。"
+	parts, err := ReplyParts(text, "paragraphs", 3)
+	if err != nil || len(parts) != 3 || strings.Join(parts, "") != text {
+		t.Fatal(parts, err)
+	}
+	if parts[0] != "一。\n\n二。\n\n" || parts[1] != "三。\n\n四。\n\n" {
+		t.Fatalf("unbalanced: %q", parts)
 	}
 }
 

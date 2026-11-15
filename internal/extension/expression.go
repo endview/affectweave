@@ -10,13 +10,7 @@ import (
 )
 
 func (s *Server) finishExpressions(ctx context.Context, p Params, f storage.FrozenInput, scope affect.Scope) (map[string]any, error) {
-	if p.Settings.ReplyMode == "character" {
-		p.Settings.ReplyMode = "single"
-		hints := affect.ExpressionFor(f.State)
-		if hints.Directness < .7 && f.State.Persona.EffectiveParameters().Expression >= .4 {
-			p.Settings.ReplyMode = "paragraphs"
-		}
-	}
+	p.Settings.ReplyMode = affect.EffectiveReplyMode(p.Settings.ReplyMode, &f.State)
 	result, err := finishedResponse(p, "Character facts recorded; persistent proposals require confirmation")
 	if err != nil || p.Status != "completed" || p.Delivery == nil || !p.Delivery.Reply || !p.Settings.Expression || f.Expression == nil {
 		return result, err
